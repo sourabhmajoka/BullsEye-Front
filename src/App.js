@@ -27,7 +27,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // ============================================================
 // CONFIG
 // ============================================================
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'https://bullseye-back.onrender.com/api';
 
 const apiFetch = async (path, options = {}) => {
   const token = localStorage.getItem('bullseye_token');
