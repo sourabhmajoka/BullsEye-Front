@@ -2526,20 +2526,27 @@ const EmailVerificationPage = ({ token }) => {
 };
 
 const AppContent = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, guestLogin } = useAuth();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedStock, setSelectedStock] = useState(null);
   const [prevTab, setPrevTab] = useState('dashboard');
-  // 'landing' | 'login' | 'register' — shown only when not authenticated
+  // 'landing' | 'login' | 'register' — no 'guest' state needed anymore
   const [authView, setAuthView] = useState('landing');
+  const [guestLoading, setGuestLoading] = useState(false);
 
-  // Reset authView when user logs out so GuestRedirect doesn't re-trigger guestLogin
-  useEffect(() => {
-    if (!user && !loading) {
-      setAuthView('landing');
+  const handleGuestLogin = async () => {
+    setGuestLoading(true);
+    try {
+      await guestLogin();
+      toast.info('Browsing as guest');
+    } catch (err) {
+      toast.error(err.message || 'Failed to load guest access');
+    } finally {
+      setGuestLoading(false);
     }
-  }, [user, loading]);
-
+  };
+  
   if (loading) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
@@ -2552,20 +2559,26 @@ const AppContent = () => {
     </div>
   );
 
-  // Not logged in — show landing or auth form
+   // Not logged in — show landing or auth form
   if (!user) {
     if (authView === 'landing') {
+      if (guestLoading) {
+        return (
+          <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-4">
+              <Spinner size={32} className="text-emerald-400" />
+              <div className="text-white text-sm">Loading guest access…</div>
+            </div>
+          </div>
+        );
+      }
       return (
         <LandingPage
           onLogin={() => setAuthView('login')}
           onRegister={() => setAuthView('register')}
-          onGuest={() => setAuthView('guest')}
+          onGuest={handleGuestLogin}
         />
       );
-    }
-    if (authView === 'guest') {
-      // Render AuthPage in login mode but immediately trigger guest
-      return <GuestRedirect onBack={() => setAuthView('landing')} />;
     }
     return (
       <AuthPage
