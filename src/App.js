@@ -8,17 +8,17 @@ import { TrendingUp, TrendingDown, Search, Bell, User, Settings, LogOut, Home, B
 const formatCurrency = (val, decimals = 2) => {
   if (!val && val !== 0) return '—';
   const n = parseFloat(val);
-  if (Math.abs(n) >= 10000000) return `₹${(n/10000000).toFixed(2)}Cr`;
-  if (Math.abs(n) >= 100000) return `₹${(n/100000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1000) return `₹${n.toLocaleString('en-IN', {maximumFractionDigits: decimals})}`;
+  if (Math.abs(n) >= 10000000) return `₹${(n / 10000000).toFixed(2)}Cr`;
+  if (Math.abs(n) >= 100000) return `₹${(n / 100000).toFixed(2)}L`;
+  if (Math.abs(n) >= 1000) return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: decimals })}`;
   return `₹${n.toFixed(decimals)}`;
 };
 const formatNum = (val, dec = 2) => val != null ? parseFloat(val).toFixed(dec) : '—';
 const formatVolume = (vol) => {
   if (!vol) return '—';
-  if (vol >= 10000000) return `${(vol/10000000).toFixed(2)}Cr`;
-  if (vol >= 100000) return `${(vol/100000).toFixed(2)}L`;
-  if (vol >= 1000) return `${(vol/1000).toFixed(1)}K`;
+  if (vol >= 10000000) return `${(vol / 10000000).toFixed(2)}Cr`;
+  if (vol >= 100000) return `${(vol / 100000).toFixed(2)}L`;
+  if (vol >= 1000) return `${(vol / 1000).toFixed(1)}K`;
   return vol;
 };
 const clsx = (...classes) => classes.filter(Boolean).join(' ');
@@ -34,11 +34,16 @@ const apiFetch = async (path, options = {}) => {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (res.status === 401) {          // ✅ auto-logout on expired token
+    localStorage.clear();
+    window.location.reload();
+    return;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Network error' }));
     throw new Error(err.error || `HTTP ${res.status}`);
+    return res.json();
   }
-  return res.json();
 };
 
 // ============================================================
@@ -50,7 +55,7 @@ const useAuth = () => useContext(AuthContext);
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  
+
   useEffect(() => {
     const token = localStorage.getItem('bullseye_token');
     const saved = localStorage.getItem('bullseye_user');
@@ -61,12 +66,12 @@ const AuthProvider = ({ children }) => {
         apiFetch('/auth/me').then(d => {
           setUser(d.user);
           localStorage.setItem('bullseye_user', JSON.stringify(d.user));
-        }).catch(() => { localStorage.clear(); }).finally(() => setLoading(false));
-      }catch (error) {
+        }).catch(() => { localStorage.clear(); setUser(null); }).finally(() => setLoading(false));
+      } catch (error) {
         localStorage.clear();
         setLoading(false);
       }
-    }else {
+    } else {
       setLoading(false);
     }
   }, []);
@@ -79,9 +84,12 @@ const AuthProvider = ({ children }) => {
   };
   const register = async (data) => {
     const d = await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data) });
-    localStorage.setItem('bullseye_token', d.token);
-    localStorage.setItem('bullseye_user', JSON.stringify(d.user));
-    setUser(d.user); return d;
+    if (d.token && d.user) {         // ✅ only persist if token exists (dev mode auto-verify)
+      localStorage.setItem('bullseye_token', d.token);
+      localStorage.setItem('bullseye_user', JSON.stringify(d.user));
+      setUser(d.user);
+    }
+    return d;
   };
   const guestLogin = async () => {
     const d = await apiFetch('/auth/guest', { method: 'POST' });
@@ -115,13 +123,13 @@ const ToastProvider = ({ children }) => {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
   };
   return (
-    <ToastContext.Provider value={{ success: m => show(m,'success'), error: m => show(m,'error'), info: m => show(m,'info') }}>
+    <ToastContext.Provider value={{ success: m => show(m, 'success'), error: m => show(m, 'error'), info: m => show(m, 'info') }}>
       {children}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
         {toasts.map(t => (
           <div key={t.id} className={clsx('px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 text-sm font-medium animate-slide-up',
-            t.type==='success'?'bg-emerald-500 text-white':t.type==='error'?'bg-red-500 text-white':'bg-slate-700 text-white')}>
-            {t.type==='success'?<Check size={16}/>:t.type==='error'?<AlertCircle size={16}/>:<Info size={16}/>}
+            t.type === 'success' ? 'bg-emerald-500 text-white' : t.type === 'error' ? 'bg-red-500 text-white' : 'bg-slate-700 text-white')}>
+            {t.type === 'success' ? <Check size={16} /> : t.type === 'error' ? <AlertCircle size={16} /> : <Info size={16} />}
             {t.msg}
           </div>
         ))}
@@ -180,7 +188,7 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
         <div className="absolute top-40 right-1/4 w-[300px] h-[300px] bg-cyan-500/8 rounded-full blur-3xl pointer-events-none" />
         <div className="max-w-5xl mx-auto text-center relative">
           <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-4 py-1.5 mb-6">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"/>
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-emerald-400 text-xs font-semibold tracking-wide">NSE & BSE Live Data</span>
           </div>
           <h1 className="text-6xl font-black leading-tight mb-6">
@@ -196,11 +204,11 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
           <div className="flex items-center justify-center gap-4 flex-wrap">
             <button onClick={onRegister}
               className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold px-8 py-4 rounded-2xl hover:from-emerald-400 hover:to-cyan-400 transition-all shadow-xl shadow-emerald-500/30 text-base">
-              <TrendingUp size={20}/> Get Started Free
+              <TrendingUp size={20} /> Get Started Free
             </button>
             <button onClick={onGuest}
               className="flex items-center gap-2 border border-slate-600 text-slate-300 hover:bg-slate-800 font-semibold px-8 py-4 rounded-2xl transition-all text-base">
-              <Eye size={20}/> Explore as Guest
+              <Eye size={20} /> Explore as Guest
             </button>
           </div>
           <p className="text-slate-600 text-sm mt-4">No credit card · Free forever · Ready in 30 seconds</p>
@@ -208,7 +216,7 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
 
         {/* Stats */}
         <div className="max-w-3xl mx-auto mt-16 grid grid-cols-4 gap-4">
-          {[['150+','Indian Stocks'],['NSE','Live Data'],['AI','Powered'],['Free','To Use']].map(([val, label]) => (
+          {[['150+', 'Indian Stocks'], ['NSE', 'Live Data'], ['AI', 'Powered'], ['Free', 'To Use']].map(([val, label]) => (
             <div key={label} className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5 text-center hover:border-emerald-500/30 transition-all">
               <div className="text-3xl font-black text-emerald-400 mb-1">{val}</div>
               <div className="text-slate-500 text-sm">{label}</div>
@@ -221,11 +229,11 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
       <section className="max-w-6xl mx-auto px-6 mb-20">
         <div className="bg-slate-900 border border-slate-700/50 rounded-3xl p-6 shadow-2xl">
           <div className="flex items-center gap-2 mb-5">
-            <div className="w-3 h-3 rounded-full bg-red-500"/><div className="w-3 h-3 rounded-full bg-yellow-500"/><div className="w-3 h-3 rounded-full bg-emerald-500"/>
+            <div className="w-3 h-3 rounded-full bg-red-500" /><div className="w-3 h-3 rounded-full bg-yellow-500" /><div className="w-3 h-3 rounded-full bg-emerald-500" />
             <span className="ml-3 text-slate-500 text-xs font-mono">BullsEye Dashboard</span>
           </div>
           <div className="grid grid-cols-4 gap-3 mb-4">
-            {[['NIFTY 50','24,834','+0.58%',true],['SENSEX','81,520','+0.62%',true],['BANK NIFTY','53,210','-0.23%',false],['NIFTY IT','38,950','+1.12%',true]].map(([n,v,c,up]) => (
+            {[['NIFTY 50', '24,834', '+0.58%', true], ['SENSEX', '81,520', '+0.62%', true], ['BANK NIFTY', '53,210', '-0.23%', false], ['NIFTY IT', '38,950', '+1.12%', true]].map(([n, v, c, up]) => (
               <div key={n} className="bg-slate-800 rounded-xl p-3">
                 <div className="text-slate-400 text-xs">{n}</div>
                 <div className="text-white font-bold">{v}</div>
@@ -236,7 +244,7 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-800 rounded-xl p-4">
               <div className="text-slate-400 text-xs mb-2 font-semibold tracking-wider">TOP GAINERS</div>
-              {[['HINDUNILVR','₹2,240','+4.72%'],['NESTLEIND','₹1,285','+2.20%'],['JSWSTEEL','₹1,241','+2.20%']].map(([s,p,c]) => (
+              {[['HINDUNILVR', '₹2,240', '+4.72%'], ['NESTLEIND', '₹1,285', '+2.20%'], ['JSWSTEEL', '₹1,241', '+2.20%']].map(([s, p, c]) => (
                 <div key={s} className="flex justify-between py-1.5 border-b border-slate-700/50 last:border-0">
                   <div><div className="text-white text-sm font-semibold">{s}</div><div className="text-slate-500 text-xs">{p}</div></div>
                   <span className="text-emerald-400 text-sm font-bold self-center">{c}</span>
@@ -283,7 +291,7 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
           <div className="flex items-center justify-center gap-4 flex-wrap">
             <button onClick={onRegister}
               className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold px-8 py-4 rounded-2xl hover:from-emerald-400 hover:to-cyan-400 transition-all shadow-xl shadow-emerald-500/30 text-base">
-              <TrendingUp size={20}/> Create Free Account
+              <TrendingUp size={20} /> Create Free Account
             </button>
             <button onClick={onLogin}
               className="border border-slate-600 text-slate-300 hover:bg-slate-800 font-semibold px-8 py-4 rounded-2xl transition-all text-base">
@@ -301,7 +309,7 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
       <footer className="border-t border-slate-800 px-6 py-8 text-center">
         <div className="flex items-center justify-center gap-2 mb-2">
           <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center">
-            <TrendingUp size={12} className="text-white"/>
+            <TrendingUp size={12} className="text-white" />
           </div>
           <span className="text-white font-bold">BullsEye</span>
         </div>
@@ -316,23 +324,23 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
 // AUTH PAGE — Login / Signup
 // ============================================================
 const AuthPage = ({ initialMode = 'login', onBack }) => {
-  const [mode, setMode]               = useState(initialMode);
+  const [mode, setMode] = useState(initialMode);
   const { login, register, guestLogin } = useAuth();
-  const toast                         = useToast();
-  const [loading, setLoading]         = useState(false);
-  const [showPwd, setShowPwd]         = useState(false);
+  const toast = useToast();
+  const [loading, setLoading] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
   const [showRiskInfo, setShowRiskInfo] = useState(false);
   const [form, setForm] = useState({
     identifier: '', password: '', username: '',
     email: '', full_name: '', risk_profile: 'moderate'
   });
 
-  const set = (k, v) => setForm(f => ({...f, [k]: v}));
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const riskProfiles = {
     conservative: { emoji: '🛡️', label: 'Conservative', desc: 'Safety first. Large-cap stocks, dividends, low volatility. Capital preservation over growth.' },
-    moderate:     { emoji: '⚖️', label: 'Moderate',     desc: 'Balanced risk-reward. Mix of large and mid-cap stocks. Long-term wealth building.' },
-    aggressive:   { emoji: '🚀', label: 'Aggressive',   desc: 'High risk, high reward. Small/mid-cap growth stocks and momentum plays. 5+ year horizon.' },
+    moderate: { emoji: '⚖️', label: 'Moderate', desc: 'Balanced risk-reward. Mix of large and mid-cap stocks. Long-term wealth building.' },
+    aggressive: { emoji: '🚀', label: 'Aggressive', desc: 'High risk, high reward. Small/mid-cap growth stocks and momentum plays. 5+ year horizon.' },
   };
 
   const handleSubmit = async (e) => {
@@ -350,7 +358,7 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
         });
         toast.success('Account created! You can now sign in.');
       }
-    } catch(err) {
+    } catch (err) {
       toast.error(err.message || 'Something went wrong');
     } finally {
       setLoading(false);
@@ -360,7 +368,7 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
   const handleGuest = async () => {
     setLoading(true);
     try { await guestLogin(); toast.info('Browsing as guest'); }
-    catch(err) { toast.error(err.message); }
+    catch (err) { toast.error(err.message); }
     finally { setLoading(false); }
   };
 
@@ -370,7 +378,7 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
       <div className="relative w-full max-w-md">
         {onBack && (
           <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white text-sm mb-5 transition-colors">
-            <ChevronRight size={16} className="rotate-180"/> Back to home
+            <ChevronRight size={16} className="rotate-180" /> Back to home
           </button>
         )}
         <div className="text-center mb-7">
@@ -385,10 +393,10 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
 
         <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
           <div className="flex bg-slate-800 rounded-xl p-1 mb-6">
-            {[['login','Sign In'],['register','Sign Up']].map(([m, lbl]) => (
+            {[['login', 'Sign In'], ['register', 'Sign Up']].map(([m, lbl]) => (
               <button key={m} onClick={() => setMode(m)}
                 className={clsx('flex-1 py-2 rounded-lg text-sm font-semibold transition-all',
-                  mode===m ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400 hover:text-white')}>
+                  mode === m ? 'bg-emerald-500 text-white shadow-lg' : 'text-slate-400 hover:text-white')}>
                 {lbl}
               </button>
             ))}
@@ -416,7 +424,7 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
                 placeholder="Min 6 characters" required />
               <button type="button" onClick={() => setShowPwd(p => !p)}
                 className="absolute right-3 top-8 text-slate-400 hover:text-white">
-                {showPwd ? <EyeOff size={16}/> : <Eye size={16}/>}
+                {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
 
@@ -426,7 +434,7 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
                   <label className="text-xs text-slate-400">Risk Profile</label>
                   <button type="button" onClick={() => setShowRiskInfo(v => !v)}
                     className="text-slate-500 hover:text-slate-300 transition-colors">
-                    <Info size={13}/>
+                    <Info size={13} />
                   </button>
                   <span className="text-xs text-indigo-400 italic">shapes AI responses</span>
                 </div>
@@ -459,14 +467,14 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
 
             <button type="submit" disabled={loading}
               className="w-full py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold rounded-xl hover:from-emerald-400 hover:to-cyan-400 transition-all shadow-lg shadow-emerald-500/25 disabled:opacity-50 flex items-center justify-center gap-2">
-              {loading && <Spinner size={18}/>}
+              {loading && <Spinner size={18} />}
               {mode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
 
           {mode === 'register' && (
             <div className="mt-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl px-4 py-2.5 flex items-start gap-2">
-              <Check size={13} className="text-emerald-400 flex-shrink-0 mt-0.5"/>
+              <Check size={13} className="text-emerald-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-slate-400">
                 A <strong className="text-emerald-400">verification email</strong> will be sent to activate your account.
               </p>
@@ -474,14 +482,14 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
           )}
 
           <div className="my-4 flex items-center gap-3">
-            <div className="flex-1 h-px bg-slate-700"/>
+            <div className="flex-1 h-px bg-slate-700" />
             <span className="text-slate-500 text-xs">or</span>
-            <div className="flex-1 h-px bg-slate-700"/>
+            <div className="flex-1 h-px bg-slate-700" />
           </div>
 
           <button onClick={handleGuest} disabled={loading}
             className="w-full py-3 border border-slate-600 text-slate-300 font-semibold rounded-xl hover:bg-slate-800 transition-all flex items-center justify-center gap-2">
-            <Eye size={16}/> Continue as Guest
+            <Eye size={16} /> Continue as Guest
           </button>
           <p className="text-center text-xs text-slate-600 mt-2">
             Guest: market data only · No portfolio or AI
@@ -511,9 +519,9 @@ const getMarketStatus = () => {
   const ist = new Date(utc + 5.5 * 3600000);
   const day = ist.getDay(); // 0=Sun, 6=Sat
   const hour = ist.getHours();
-  const min  = ist.getMinutes();
+  const min = ist.getMinutes();
   const totalMin = hour * 60 + min;
-  const openMin  = 9 * 60 + 15;   // 9:15 AM
+  const openMin = 9 * 60 + 15;   // 9:15 AM
   const closeMin = 15 * 60 + 30;  // 3:30 PM
   if (day === 0 || day === 6) return { open: false, label: 'Closed (Weekend)' };
   if (totalMin >= openMin && totalMin < closeMin) return { open: true, label: 'Live' };
@@ -525,12 +533,12 @@ const getMarketStatus = () => {
 const Sidebar = ({ activeTab, setActiveTab }) => {
   const { user, isGuest, logout } = useAuth();
   const navItems = [
-    { id: 'dashboard', icon: Home,         label: 'Dashboard' },
-    { id: 'stocks',    icon: BarChart2,     label: 'Stocks' },
-    { id: 'portfolio', icon: Briefcase,     label: 'Portfolio', guestLock: true },
-    { id: 'watchlist', icon: Star,          label: 'Watchlist', guestLock: true },
-    { id: 'ai',        icon: MessageCircle, label: 'AI Assistant', guestLock: true },
-    { id: 'profile',   icon: Settings,      label: 'Profile' },
+    { id: 'dashboard', icon: Home, label: 'Dashboard' },
+    { id: 'stocks', icon: BarChart2, label: 'Stocks' },
+    { id: 'portfolio', icon: Briefcase, label: 'Portfolio', guestLock: true },
+    { id: 'watchlist', icon: Star, label: 'Watchlist', guestLock: true },
+    { id: 'ai', icon: MessageCircle, label: 'AI Assistant', guestLock: true },
+    { id: 'profile', icon: Settings, label: 'Profile' },
   ];
 
   return (
@@ -578,7 +586,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       {/* Bottom */}
       <div className="p-4 border-t border-slate-800">
         <button onClick={logout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:bg-red-500/10 hover:text-red-400 transition-all text-sm font-medium">
-          <LogOut size={18}/> Sign Out
+          <LogOut size={18} /> Sign Out
         </button>
         {isGuest && (
           <div className="mt-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-400">
@@ -622,12 +630,12 @@ const Header = ({ title, onSearch }) => {
         {/* Search */}
         <div className="relative" ref={searchRef}>
           <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 w-72">
-            {searching ? <Spinner size={16} className="text-slate-400" /> : <Search size={16} className="text-slate-400"/>}
+            {searching ? <Spinner size={16} className="text-slate-400" /> : <Search size={16} className="text-slate-400" />}
             <input value={query} onChange={e => { setQuery(e.target.value); setShow(true); }}
               onFocus={() => setShow(true)} onBlur={() => setTimeout(() => setShow(false), 200)}
               placeholder="Search stocks (TCS, RELIANCE...)"
               className="bg-transparent text-white text-sm outline-none flex-1 placeholder-slate-500 w-full" />
-            {query && <button onClick={() => { setQuery(''); setResults([]); }}><X size={14} className="text-slate-500"/></button>}
+            {query && <button onClick={() => { setQuery(''); setResults([]); }}><X size={14} className="text-slate-500" /></button>}
           </div>
           {show && results.length > 0 && (
             <div className="absolute top-full left-0 right-0 mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50 max-h-72 overflow-y-auto">
@@ -650,7 +658,7 @@ const Header = ({ title, onSearch }) => {
           return (
             <div className={clsx('flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border',
               ms.open ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-slate-700/50 border-slate-600 text-slate-400')}>
-              <div className={clsx('w-1.5 h-1.5 rounded-full', ms.open ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500')}/>
+              <div className={clsx('w-1.5 h-1.5 rounded-full', ms.open ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500')} />
               NSE {ms.label}
             </div>
           );
@@ -670,7 +678,7 @@ const IndexCard = ({ name, data }) => {
       <div className="text-slate-400 text-xs font-medium mb-1">{name}</div>
       <div className="text-white font-bold text-lg">{data?.current?.toLocaleString('en-IN') || '—'}</div>
       <div className={clsx('flex items-center gap-1 text-sm font-semibold mt-0.5', isUp ? 'text-emerald-400' : 'text-red-400')}>
-        {isUp ? <ArrowUpRight size={14}/> : <ArrowDownRight size={14}/>}
+        {isUp ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
         {Math.abs(data?.change_percent || 0).toFixed(2)}%
         <span className="text-xs font-normal opacity-70">
           ({isUp ? '+' : ''}{data?.change?.toFixed(2) || '0.00'})
@@ -698,17 +706,17 @@ const Dashboard = ({ onSelectStock }) => {
     // Fire all three requests in parallel — render as each resolves
     apiFetch('/market/indices')
       .then(d => setIndices(d || {}))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setIndicesLoading(false));
 
     apiFetch('/market/movers')
       .then(d => setMovers(d || { gainers: [], losers: [] }))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setMoversLoading(false));
 
     apiFetch('/market/sectors')
       .then(d => setSectors(d || {}))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setSectorsLoading(false));
 
     if (!isGuest) {
@@ -719,7 +727,7 @@ const Dashboard = ({ onSelectStock }) => {
             setPortfolio(p);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, []);
 
@@ -729,7 +737,7 @@ const Dashboard = ({ onSelectStock }) => {
 
   const SkeletonCard = () => (
     <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4 animate-pulse">
-      <div className="h-3 bg-slate-700 rounded w-16 mb-2"/><div className="h-6 bg-slate-700 rounded w-24 mb-2"/><div className="h-4 bg-slate-700 rounded w-20"/>
+      <div className="h-3 bg-slate-700 rounded w-16 mb-2" /><div className="h-6 bg-slate-700 rounded w-24 mb-2" /><div className="h-4 bg-slate-700 rounded w-20" />
     </div>
   );
 
@@ -742,13 +750,13 @@ const Dashboard = ({ onSelectStock }) => {
           <div className="text-slate-400 text-sm mt-0.5">NSE &amp; BSE • Real-time Data</div>
         </div>
         <div className="flex items-center gap-2">
-          {indicesLoading ? <Spinner size={14} className="text-emerald-400"/> : null}
+          {indicesLoading ? <Spinner size={14} className="text-emerald-400" /> : null}
           {(() => {
             const ms = getMarketStatus();
             return (
               <div className={clsx('flex items-center gap-1.5 text-sm font-semibold',
                 ms.open ? 'text-emerald-400' : 'text-slate-400')}>
-                <div className={clsx('w-2 h-2 rounded-full', ms.open ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500')}/>
+                <div className={clsx('w-2 h-2 rounded-full', ms.open ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500')} />
                 {indicesLoading ? 'Loading…' : ms.label}
               </div>
             );
@@ -761,11 +769,11 @@ const Dashboard = ({ onSelectStock }) => {
         {indicesLoading
           ? Array(4).fill(0).map((_, i) => <SkeletonCard key={i} />)
           : <>
-              <IndexCard name="NIFTY 50" data={indices.NIFTY50} />
-              <IndexCard name="SENSEX" data={indices.SENSEX} />
-              <IndexCard name="BANK NIFTY" data={indices.BANKNIFTY} />
-              <IndexCard name="NIFTY IT" data={indices.NIFTYIT} />
-            </>
+            <IndexCard name="NIFTY 50" data={indices.NIFTY50} />
+            <IndexCard name="SENSEX" data={indices.SENSEX} />
+            <IndexCard name="BANK NIFTY" data={indices.BANKNIFTY} />
+            <IndexCard name="NIFTY IT" data={indices.NIFTYIT} />
+          </>
         }
       </div>
 
@@ -797,43 +805,43 @@ const Dashboard = ({ onSelectStock }) => {
         {/* Movers */}
         <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
           <h2 className="text-white font-bold text-sm mb-4 flex items-center gap-2">
-            Top Movers Today {moversLoading && <Spinner size={14} className="text-slate-400"/>}
+            Top Movers Today {moversLoading && <Spinner size={14} className="text-slate-400" />}
           </h2>
           {moversLoading ? (
             <div className="space-y-2 animate-pulse">
               {Array(6).fill(0).map((_, i) => (
                 <div key={i} className="flex justify-between items-center py-2 px-3">
-                  <div><div className="h-3 bg-slate-700 rounded w-16 mb-1"/><div className="h-3 bg-slate-700 rounded w-12"/></div>
-                  <div className="h-3 bg-slate-700 rounded w-14"/>
+                  <div><div className="h-3 bg-slate-700 rounded w-16 mb-1" /><div className="h-3 bg-slate-700 rounded w-12" /></div>
+                  <div className="h-3 bg-slate-700 rounded w-14" />
                 </div>
               ))}
             </div>
           ) : (
             <div className="space-y-1">
-              <div className="text-emerald-400 text-xs font-semibold mb-2 flex items-center gap-1"><TrendingUp size={12}/>Top Gainers</div>
-              {(movers.gainers || []).slice(0,4).map(s => (
+              <div className="text-emerald-400 text-xs font-semibold mb-2 flex items-center gap-1"><TrendingUp size={12} />Top Gainers</div>
+              {(movers.gainers || []).slice(0, 4).map(s => (
                 <button key={s.symbol} onClick={() => onSelectStock(s.symbol)}
                   className="w-full flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-800 transition-all">
                   <div className="text-left">
                     <div className="text-white text-sm font-semibold">{s.symbol}</div>
                     <div className="text-slate-500 text-xs">{formatCurrency(s.price)}</div>
                   </div>
-                  <span className="text-emerald-400 text-sm font-bold">+{(s.change_percent||0).toFixed(2)}%</span>
+                  <span className="text-emerald-400 text-sm font-bold">+{(s.change_percent || 0).toFixed(2)}%</span>
                 </button>
               ))}
-              {(movers.gainers||[]).length === 0 && <div className="text-slate-500 text-xs px-3">No data available</div>}
-              <div className="text-red-400 text-xs font-semibold mt-3 mb-2 flex items-center gap-1"><TrendingDown size={12}/>Top Losers</div>
-              {(movers.losers || []).slice(0,4).map(s => (
+              {(movers.gainers || []).length === 0 && <div className="text-slate-500 text-xs px-3">No data available</div>}
+              <div className="text-red-400 text-xs font-semibold mt-3 mb-2 flex items-center gap-1"><TrendingDown size={12} />Top Losers</div>
+              {(movers.losers || []).slice(0, 4).map(s => (
                 <button key={s.symbol} onClick={() => onSelectStock(s.symbol)}
                   className="w-full flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-800 transition-all">
                   <div className="text-left">
                     <div className="text-white text-sm font-semibold">{s.symbol}</div>
                     <div className="text-slate-500 text-xs">{formatCurrency(s.price)}</div>
                   </div>
-                  <span className="text-red-400 text-sm font-bold">{(s.change_percent||0).toFixed(2)}%</span>
+                  <span className="text-red-400 text-sm font-bold">{(s.change_percent || 0).toFixed(2)}%</span>
                 </button>
               ))}
-              {(movers.losers||[]).length === 0 && <div className="text-slate-500 text-xs px-3">No data available</div>}
+              {(movers.losers || []).length === 0 && <div className="text-slate-500 text-xs px-3">No data available</div>}
             </div>
           )}
         </div>
@@ -841,14 +849,14 @@ const Dashboard = ({ onSelectStock }) => {
         {/* Sectors */}
         <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
           <h2 className="text-white font-bold text-sm mb-4 flex items-center gap-2">
-            Sector Performance {sectorsLoading && <Spinner size={14} className="text-slate-400"/>}
+            Sector Performance {sectorsLoading && <Spinner size={14} className="text-slate-400" />}
           </h2>
           {sectorsLoading ? (
             <div className="space-y-3 animate-pulse pt-2">
               {Array(6).fill(0).map((_, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <div className="h-3 bg-slate-700 rounded w-16"/>
-                  <div className="flex-1 h-5 bg-slate-700 rounded"/>
+                  <div className="h-3 bg-slate-700 rounded w-16" />
+                  <div className="flex-1 h-5 bg-slate-700 rounded" />
                 </div>
               ))}
             </div>
@@ -859,7 +867,7 @@ const Dashboard = ({ onSelectStock }) => {
                 <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} width={65} />
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                 <Tooltip formatter={v => [`${parseFloat(v).toFixed(2)}%`, 'Change']} contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', color: '#fff' }} />
-                <Bar dataKey="change" radius={[0,4,4,0]}>
+                <Bar dataKey="change" radius={[0, 4, 4, 0]}>
                   {sectorData.map((d, i) => <Cell key={i} fill={d.fill} fillOpacity={0.8} />)}
                 </Bar>
               </BarChart>
@@ -903,7 +911,7 @@ const StockDetail = ({ symbol, onBack }) => {
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
 
-  const periods = ['1mo','3mo','6mo','1y','2y','5y'];
+  const periods = ['1mo', '3mo', '6mo', '1y', '2y', '5y'];
 
   // Load quote immediately (fast via nsetools)
   useEffect(() => {
@@ -921,10 +929,10 @@ const StockDetail = ({ symbol, onBack }) => {
       apiFetch('/portfolio/').then(d => {
         setPortfolios(d.portfolios || []);
         if (d.portfolios?.length > 0) setBuyForm(prev => ({ ...prev, portfolioId: d.portfolios[0].id }));
-      }).catch(() => {});
+      }).catch(() => { });
       apiFetch('/watchlist/').then(d => {
         setInWatchlist((d.watchlist || []).some(w => w.symbol === symbol));
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, [symbol]);
 
@@ -934,7 +942,7 @@ const StockDetail = ({ symbol, onBack }) => {
     setHistory([]);
     apiFetch(`/stocks/history/${symbol}?period=${period}`)
       .then(h => setHistory(h.data || []))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setHistLoading(false));
   }, [symbol, period]);
 
@@ -943,7 +951,7 @@ const StockDetail = ({ symbol, onBack }) => {
     setFundLoading(true);
     apiFetch(`/stocks/fundamentals/${symbol}`)
       .then(f => setFundamentals(f))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setFundLoading(false));
   }, [symbol]);
 
@@ -957,7 +965,7 @@ const StockDetail = ({ symbol, onBack }) => {
         await apiFetch('/watchlist/', { method: 'POST', body: JSON.stringify({ symbol, company_name: quote?.company_name || symbol }) });
         setInWatchlist(true); toast.success('Added to watchlist');
       }
-    } catch(err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleBuy = async () => {
@@ -970,7 +978,7 @@ const StockDetail = ({ symbol, onBack }) => {
       });
       toast.success(`${buyForm.qty} shares of ${symbol} added to portfolio!`);
       setShowBuyModal(false);
-    } catch(err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message); }
     setAddingToBuy(false);
   };
 
@@ -981,7 +989,7 @@ const StockDetail = ({ symbol, onBack }) => {
       const data = await apiFetch(`/ai/analyze-stock/${symbol}`);
       setAiAnalysis(data.analysis);
       setActiveTab('ai');
-    } catch(err) { toast.error('AI analysis unavailable'); }
+    } catch (err) { toast.error('AI analysis unavailable'); }
     setAiLoading(false);
   };
 
@@ -1004,12 +1012,12 @@ const StockDetail = ({ symbol, onBack }) => {
         {quoteLoading ? (
           <div className="animate-pulse space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-slate-700 rounded-xl"/>
-              <div><div className="h-6 bg-slate-700 rounded w-20 mb-2"/><div className="h-4 bg-slate-700 rounded w-40"/></div>
+              <div className="w-12 h-12 bg-slate-700 rounded-xl" />
+              <div><div className="h-6 bg-slate-700 rounded w-20 mb-2" /><div className="h-4 bg-slate-700 rounded w-40" /></div>
             </div>
-            <div className="h-10 bg-slate-700 rounded w-48"/>
+            <div className="h-10 bg-slate-700 rounded w-48" />
             <div className="grid grid-cols-6 gap-3 pt-4 border-t border-slate-800">
-              {Array(6).fill(0).map((_, i) => <div key={i} className="h-8 bg-slate-700 rounded"/>)}
+              {Array(6).fill(0).map((_, i) => <div key={i} className="h-8 bg-slate-700 rounded" />)}
             </div>
           </div>
         ) : (
@@ -1028,8 +1036,8 @@ const StockDetail = ({ symbol, onBack }) => {
                 <div className="mt-4 flex items-end gap-3">
                   <span className="text-white font-black text-4xl">{formatCurrency(quote?.current_price)}</span>
                   <div className={clsx('flex items-center gap-1 text-lg font-bold pb-1', isUp ? 'text-emerald-400' : 'text-red-400')}>
-                    {isUp ? <ArrowUpRight size={20}/> : <ArrowDownRight size={20}/>}
-                    {isUp ? '+' : ''}{(quote?.change||0).toFixed(2)} ({isUp ? '+' : ''}{(quote?.change_percent||0).toFixed(2)}%)
+                    {isUp ? <ArrowUpRight size={20} /> : <ArrowDownRight size={20} />}
+                    {isUp ? '+' : ''}{(quote?.change || 0).toFixed(2)} ({isUp ? '+' : ''}{(quote?.change_percent || 0).toFixed(2)}%)
                   </div>
                 </div>
                 <div className="mt-2 text-slate-500 text-sm">{quote?.sector && quote.sector !== 'N/A' ? `${quote.sector} • ` : ''}{quote?.exchange || 'NSE'} • <span className={clsx('text-xs font-medium', quote?.source === 'nsetools' ? 'text-emerald-400' : 'text-slate-500')}>{quote?.source === 'nsetools' ? 'NSE Live' : 'Yahoo Finance'}</span></div>
@@ -1044,12 +1052,12 @@ const StockDetail = ({ symbol, onBack }) => {
                 {!isGuest && (
                   <button onClick={() => setShowBuyModal(true)}
                     className="px-4 py-2.5 rounded-xl bg-emerald-500 text-white text-sm font-semibold flex items-center gap-2 hover:bg-emerald-400 transition-all">
-                    <Plus size={16}/> Add to Portfolio
+                    <Plus size={16} /> Add to Portfolio
                   </button>
                 )}
                 <button onClick={getAIAnalysis} disabled={aiLoading}
                   className="px-4 py-2.5 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-sm font-semibold flex items-center gap-2 hover:bg-indigo-500/30 transition-all disabled:opacity-50">
-                  {aiLoading ? <Spinner size={14}/> : <Zap size={16}/>}
+                  {aiLoading ? <Spinner size={14} /> : <Zap size={16} />}
                   AI Analysis
                 </button>
               </div>
@@ -1077,7 +1085,7 @@ const StockDetail = ({ symbol, onBack }) => {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-900 border border-slate-700/50 rounded-xl p-1 w-fit">
-        {['chart','fundamentals','ai'].map(tab => (
+        {['chart', 'fundamentals', 'ai'].map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={clsx('px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-all',
               activeTab === tab ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-white')}>
@@ -1091,7 +1099,7 @@ const StockDetail = ({ symbol, onBack }) => {
         <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-white font-bold flex items-center gap-2">
-              Price History {histLoading && <Spinner size={14} className="text-slate-400"/>}
+              Price History {histLoading && <Spinner size={14} className="text-slate-400" />}
             </h2>
             <div className="flex gap-1">
               {periods.map(p => (
@@ -1106,7 +1114,7 @@ const StockDetail = ({ symbol, onBack }) => {
           {histLoading ? (
             <div className="h-80 flex items-center justify-center">
               <div className="text-center">
-                <Spinner size={28} className="text-emerald-400 mx-auto mb-3"/>
+                <Spinner size={28} className="text-emerald-400 mx-auto mb-3" />
                 <div className="text-slate-500 text-sm">Loading price history…</div>
               </div>
             </div>
@@ -1118,8 +1126,8 @@ const StockDetail = ({ symbol, onBack }) => {
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={isUp ? '#10b981' : '#ef4444'} stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor={isUp ? '#10b981' : '#ef4444'} stopOpacity={0}/>
+                      <stop offset="5%" stopColor={isUp ? '#10b981' : '#ef4444'} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={isUp ? '#10b981' : '#ef4444'} stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
@@ -1133,7 +1141,7 @@ const StockDetail = ({ symbol, onBack }) => {
               {/* Volume chart */}
               <ResponsiveContainer width="100%" height={80} className="mt-2">
                 <BarChart data={chartData}>
-                  <Bar dataKey="volume" fill="#334155" radius={[2,2,0,0]}/>
+                  <Bar dataKey="volume" fill="#334155" radius={[2, 2, 0, 0]} />
                   <XAxis dataKey="date" hide />
                   <YAxis hide />
                 </BarChart>
@@ -1149,11 +1157,11 @@ const StockDetail = ({ symbol, onBack }) => {
           <div className="grid grid-cols-2 gap-4">
             {Array(2).fill(0).map((_, i) => (
               <div key={i} className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5 animate-pulse space-y-3">
-                <div className="h-4 bg-slate-700 rounded w-24 mb-4"/>
+                <div className="h-4 bg-slate-700 rounded w-24 mb-4" />
                 {Array(6).fill(0).map((_, j) => (
                   <div key={j} className="flex justify-between py-2 border-b border-slate-800">
-                    <div className="h-3 bg-slate-700 rounded w-24"/>
-                    <div className="h-3 bg-slate-700 rounded w-16"/>
+                    <div className="h-3 bg-slate-700 rounded w-24" />
+                    <div className="h-3 bg-slate-700 rounded w-16" />
                   </div>
                 ))}
               </div>
@@ -1250,18 +1258,18 @@ const StockDetail = ({ symbol, onBack }) => {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-white font-bold text-lg">Add {symbol} to Portfolio</h2>
-              <button onClick={() => setShowBuyModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+              <button onClick={() => setShowBuyModal(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
             </div>
             <div className="space-y-4">
               <div>
                 <label className="text-slate-400 text-xs mb-1.5 block">Portfolio</label>
-                <select value={buyForm.portfolioId} onChange={e => setBuyForm(f => ({...f, portfolioId: e.target.value}))}
+                <select value={buyForm.portfolioId} onChange={e => setBuyForm(f => ({ ...f, portfolioId: e.target.value }))}
                   className="w-full bg-slate-800 border border-slate-600 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500">
                   {portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
-              <Input label="Quantity (shares)" type="number" value={buyForm.qty} onChange={v => setBuyForm(f => ({...f, qty: v}))} placeholder="e.g. 10" />
-              <Input label="Buy Price (₹)" type="number" value={buyForm.price} onChange={v => setBuyForm(f => ({...f, price: v}))} placeholder="Current market price" />
+              <Input label="Quantity (shares)" type="number" value={buyForm.qty} onChange={v => setBuyForm(f => ({ ...f, qty: v }))} placeholder="e.g. 10" />
+              <Input label="Buy Price (₹)" type="number" value={buyForm.price} onChange={v => setBuyForm(f => ({ ...f, price: v }))} placeholder="Current market price" />
               {buyForm.qty && buyForm.price && (
                 <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-sm">
                   <span className="text-slate-400">Total Amount: </span>
@@ -1270,7 +1278,7 @@ const StockDetail = ({ symbol, onBack }) => {
               )}
               <button onClick={handleBuy} disabled={addingToBuy}
                 className="w-full py-3 bg-emerald-500 text-white font-bold rounded-xl hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
-                {addingToBuy ? <Spinner size={18}/> : <Plus size={18}/>}
+                {addingToBuy ? <Spinner size={18} /> : <Plus size={18} />}
                 Add to Portfolio
               </button>
             </div>
@@ -1308,13 +1316,13 @@ const MarketPage = ({ onSelectStock }) => {
           <Search size={16} className="text-slate-400" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search all Indian stocks..."
             className="bg-transparent text-white text-sm outline-none flex-1 placeholder-slate-500" />
-          {search && <button onClick={() => setSearch('')}><X size={14} className="text-slate-500"/></button>}
+          {search && <button onClick={() => setSearch('')}><X size={14} className="text-slate-500" /></button>}
         </div>
         <div className="text-slate-400 text-sm">{filtered.length} stocks</div>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-48"><Spinner size={28} className="text-emerald-400"/></div>
+        <div className="flex items-center justify-center h-48"><Spinner size={28} className="text-emerald-400" /></div>
       ) : (
         <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden">
           <div className="grid grid-cols-3 gap-0 bg-slate-800 px-5 py-3 text-slate-400 text-xs font-semibold uppercase tracking-wider">
@@ -1335,7 +1343,7 @@ const MarketPage = ({ onSelectStock }) => {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-slate-400 text-xs hover:text-emerald-400 transition-colors flex items-center gap-1">
-                    View <ChevronRight size={12}/>
+                    View <ChevronRight size={12} />
                   </span>
                 </div>
               </button>
@@ -1394,7 +1402,7 @@ const PortfolioPage = ({ onSelectStock }) => {
       await apiFetch(`/portfolio/${activePortfolioId}/holding/${holdingId}`, { method: 'DELETE' });
       toast.success('Holding removed');
       await loadPortfolio(activePortfolioId);
-    } catch(err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleEditHolding = async () => {
@@ -1408,7 +1416,7 @@ const PortfolioPage = ({ onSelectStock }) => {
       toast.success('Holding updated');
       setEditHolding(null);
       await loadPortfolio(activePortfolioId);
-    } catch(err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message); }
     setEditLoading(false);
   };
 
@@ -1419,7 +1427,7 @@ const PortfolioPage = ({ onSelectStock }) => {
     try {
       const data = await apiFetch(`/ai/analyze-portfolio/${activePortfolioId}`);
       setAiAnalysis(data);
-    } catch(err) { toast.error('AI analysis failed'); }
+    } catch (err) { toast.error('AI analysis failed'); }
     setAiLoading(false);
   };
 
@@ -1433,13 +1441,13 @@ const PortfolioPage = ({ onSelectStock }) => {
     </div>
   );
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Spinner size={32} className="text-emerald-400"/></div>;
+  if (loading) return <div className="flex items-center justify-center h-64"><Spinner size={32} className="text-emerald-400" /></div>;
 
   const s = portfolioData?.summary;
   const holdings = portfolioData?.holdings || [];
   const sectorData = analytics?.sector_allocation ?
     Object.entries(analytics.sector_allocation).map(([name, pct]) => ({ name, value: pct })) : [];
-  const COLORS = ['#10b981','#06b6d4','#8b5cf6','#f59e0b','#ef4444','#ec4899','#84cc16'];
+  const COLORS = ['#10b981', '#06b6d4', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#84cc16'];
 
   return (
     <div className="space-y-5">
@@ -1459,12 +1467,12 @@ const PortfolioPage = ({ onSelectStock }) => {
           {/* Day P&L — value + % together */}
           <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
             <div className="text-slate-400 text-xs font-medium mb-2">Day P&amp;L</div>
-            <div className={clsx('text-xl font-black', (s.day_pnl||0) >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-              {(s.day_pnl||0) >= 0 ? '+' : ''}{formatCurrency(s.day_pnl||0)}
+            <div className={clsx('text-xl font-black', (s.day_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+              {(s.day_pnl || 0) >= 0 ? '+' : ''}{formatCurrency(s.day_pnl || 0)}
             </div>
-            <div className={clsx('text-xs font-semibold mt-1', (s.day_pnl||0) >= 0 ? 'text-emerald-400/70' : 'text-red-400/70')}>
+            <div className={clsx('text-xs font-semibold mt-1', (s.day_pnl || 0) >= 0 ? 'text-emerald-400/70' : 'text-red-400/70')}>
               {/* day % not separately in summary; just show indicator */}
-              {(s.day_pnl||0) >= 0 ? '▲' : '▼'} Today
+              {(s.day_pnl || 0) >= 0 ? '▲' : '▼'} Today
             </div>
           </div>
           {/* Total P&L — value + % together */}
@@ -1483,7 +1491,7 @@ const PortfolioPage = ({ onSelectStock }) => {
       {/* Tabs + AI button */}
       <div className="flex items-center justify-between">
         <div className="flex gap-1 bg-slate-900 border border-slate-700/50 rounded-xl p-1">
-          {['holdings','analytics','transactions','ai'].map(t => (
+          {['holdings', 'analytics', 'transactions', 'ai'].map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={clsx('px-4 py-2 rounded-lg text-sm font-semibold capitalize transition-all',
                 tab === t ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-white')}>
@@ -1494,7 +1502,7 @@ const PortfolioPage = ({ onSelectStock }) => {
         {holdings.length > 0 && tab !== 'ai' && (
           <button onClick={handleAIAnalysis} disabled={aiLoading}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 rounded-xl text-sm font-semibold hover:bg-indigo-500/30 transition-all disabled:opacity-50">
-            {aiLoading ? <Spinner size={14}/> : <Zap size={14}/>}
+            {aiLoading ? <Spinner size={14} /> : <Zap size={14} />}
             Analyze Portfolio with AI
           </button>
         )}
@@ -1543,11 +1551,11 @@ const PortfolioPage = ({ onSelectStock }) => {
                     <div className="flex items-center gap-2">
                       <button onClick={() => setEditHolding({ id: h.id, symbol: h.symbol, qty: h.quantity, price: h.avg_buy_price })}
                         className="p-1.5 rounded-lg bg-slate-700 text-slate-300 hover:bg-emerald-500/20 hover:text-emerald-400 transition-all" title="Edit">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                       </button>
                       <button onClick={() => handleRemoveHolding(h.id)}
                         className="p-1.5 rounded-lg bg-slate-700 text-slate-300 hover:bg-red-500/20 hover:text-red-400 transition-all" title="Remove">
-                        <X size={13}/>
+                        <X size={13} />
                       </button>
                     </div>
                   </div>
@@ -1621,7 +1629,7 @@ const PortfolioPage = ({ onSelectStock }) => {
         <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
           <div className="flex items-center gap-2 mb-5">
             <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-              <Zap size={16} className="text-indigo-400"/>
+              <Zap size={16} className="text-indigo-400" />
             </div>
             <div>
               <div className="text-white font-bold">AI Portfolio Analysis</div>
@@ -1630,17 +1638,19 @@ const PortfolioPage = ({ onSelectStock }) => {
           </div>
           {aiLoading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <Spinner size={32} className="text-indigo-400"/>
+              <Spinner size={32} className="text-indigo-400" />
               <div className="text-slate-400 text-sm">Analyzing your portfolio…</div>
             </div>
           ) : aiAnalysis ? (
             <div>
               <div className="grid grid-cols-3 gap-4 mb-5">
                 {[
-                  { label: 'Total Invested',  val: formatCurrency(aiAnalysis.summary?.total_invested) },
-                  { label: 'Current Value',   val: formatCurrency(aiAnalysis.summary?.total_current) },
-                  { label: 'Total P&L', val: `${(aiAnalysis.summary?.total_pnl||0) >= 0 ? '+' : ''}${formatCurrency(aiAnalysis.summary?.total_pnl)}`,
-                    color: (aiAnalysis.summary?.total_pnl||0) >= 0 ? 'text-emerald-400' : 'text-red-400' },
+                  { label: 'Total Invested', val: formatCurrency(aiAnalysis.summary?.total_invested) },
+                  { label: 'Current Value', val: formatCurrency(aiAnalysis.summary?.total_current) },
+                  {
+                    label: 'Total P&L', val: `${(aiAnalysis.summary?.total_pnl || 0) >= 0 ? '+' : ''}${formatCurrency(aiAnalysis.summary?.total_pnl)}`,
+                    color: (aiAnalysis.summary?.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
+                  },
                 ].map(item => (
                   <div key={item.label} className="bg-slate-800 rounded-xl p-3">
                     <div className="text-slate-500 text-xs mb-1">{item.label}</div>
@@ -1653,17 +1663,17 @@ const PortfolioPage = ({ onSelectStock }) => {
               </div>
               <button onClick={handleAIAnalysis}
                 className="mt-4 flex items-center gap-2 text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
-                <RefreshCw size={13}/> Refresh Analysis
+                <RefreshCw size={13} /> Refresh Analysis
               </button>
             </div>
           ) : (
             <div className="text-center py-12">
-              <Zap size={40} className="text-indigo-400/50 mx-auto mb-3"/>
+              <Zap size={40} className="text-indigo-400/50 mx-auto mb-3" />
               <div className="text-white font-semibold mb-2">Get AI Portfolio Analysis</div>
               <div className="text-slate-400 text-sm mb-5">AI will analyze your holdings, identify risks, suggest improvements, and recommend stocks to add.</div>
               <button onClick={handleAIAnalysis} disabled={holdings.length === 0}
                 className="px-6 py-3 bg-indigo-500 text-white font-semibold rounded-xl hover:bg-indigo-400 transition-all disabled:opacity-50 flex items-center gap-2 mx-auto">
-                <Zap size={16}/> Analyze My Portfolio
+                <Zap size={16} /> Analyze My Portfolio
               </button>
               {holdings.length === 0 && <div className="text-slate-500 text-xs mt-3">Add holdings to your portfolio first</div>}
             </div>
@@ -1677,13 +1687,13 @@ const PortfolioPage = ({ onSelectStock }) => {
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-white font-bold">Edit {editHolding.symbol}</h2>
-              <button onClick={() => setEditHolding(null)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+              <button onClick={() => setEditHolding(null)} className="text-slate-400 hover:text-white"><X size={20} /></button>
             </div>
             <div className="space-y-4">
               <Input label="Quantity (shares)" type="number" value={editHolding.qty}
-                onChange={v => setEditHolding(e => ({...e, qty: v}))} />
+                onChange={v => setEditHolding(e => ({ ...e, qty: v }))} />
               <Input label="Avg Buy Price (₹)" type="number" value={editHolding.price}
-                onChange={v => setEditHolding(e => ({...e, price: v}))} />
+                onChange={v => setEditHolding(e => ({ ...e, price: v }))} />
               {editHolding.qty && editHolding.price && (
                 <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-sm">
                   <span className="text-slate-400">New invested value: </span>
@@ -1694,7 +1704,7 @@ const PortfolioPage = ({ onSelectStock }) => {
                 <button onClick={() => setEditHolding(null)} className="flex-1 py-2.5 border border-slate-600 text-slate-400 rounded-xl hover:bg-slate-800 transition-all text-sm font-semibold">Cancel</button>
                 <button onClick={handleEditHolding} disabled={editLoading}
                   className="flex-1 py-2.5 bg-emerald-500 text-white rounded-xl hover:bg-emerald-400 transition-all text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50">
-                  {editLoading ? <Spinner size={16}/> : <Check size={16}/>} Save
+                  {editLoading ? <Spinner size={16} /> : <Check size={16} />} Save
                 </button>
               </div>
             </div>
@@ -1711,10 +1721,10 @@ const TransactionHistory = () => {
 
   useEffect(() => {
     apiFetch('/portfolio/transactions').then(d => setTransactions(d.transactions || []))
-      .catch(() => {}).finally(() => setLoading(false));
+      .catch(() => { }).finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="flex items-center justify-center h-24"><Spinner size={24} className="text-emerald-400"/></div>;
+  if (loading) return <div className="flex items-center justify-center h-24"><Spinner size={24} className="text-emerald-400" /></div>;
 
   return (
     <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden">
@@ -1766,14 +1776,12 @@ const WatchlistPage = ({ onSelectStock }) => {
       if (wl.length > 0) {
         const symbols = wl.map(w => w.symbol);
         try {
-          const res = await fetch(`${API_BASE}/stocks/batch-quotes`, {
+          const data = await apiFetch('/stocks/batch-quotes', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bullseye_token')}` },
             body: JSON.stringify({ symbols })
           });
-          const data = await res.json();
           setQuotes(data);
-        } catch {}
+        } catch { }
       }
     }).catch(() => toast.error('Failed to load watchlist')).finally(() => setLoading(false));
   }, []);
@@ -1783,7 +1791,7 @@ const WatchlistPage = ({ onSelectStock }) => {
       await apiFetch(`/watchlist/${symbol}`, { method: 'DELETE' });
       setWatchlist(prev => prev.filter(w => w.symbol !== symbol));
       toast.success('Removed from watchlist');
-    } catch {}
+    } catch { }
   };
 
   if (isGuest) return (
@@ -1796,7 +1804,7 @@ const WatchlistPage = ({ onSelectStock }) => {
     </div>
   );
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Spinner size={32} className="text-emerald-400"/></div>;
+  if (loading) return <div className="flex items-center justify-center h-64"><Spinner size={32} className="text-emerald-400" /></div>;
 
   return (
     <div className="space-y-4">
@@ -1836,20 +1844,20 @@ const WatchlistPage = ({ onSelectStock }) => {
                   </div>
                   <div className="text-white font-semibold text-sm">{formatCurrency(q?.current_price)}</div>
                   <div className={clsx('flex items-center gap-0.5 text-sm font-semibold', isUp ? 'text-emerald-400' : 'text-red-400')}>
-                    {isUp ? <ArrowUpRight size={13}/> : <ArrowDownRight size={13}/>}
+                    {isUp ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
                     {isUp ? '+' : ''}{q?.change_percent?.toFixed(2) || '—'}%
                   </div>
                   <div className="text-slate-400 text-xs">
                     {q?.low ? `${formatCurrency(q.low)} - ${formatCurrency(q.high)}` : '—'}
                   </div>
                   <div className="text-slate-400 text-xs">
-                    {mktCap >= 10000000000 ? `₹${(mktCap/10000000).toFixed(0)}Cr`
-                      : mktCap >= 100000000 ? `₹${(mktCap/10000000).toFixed(1)}Cr`
-                      : '—'}
+                    {mktCap >= 10000000000 ? `₹${(mktCap / 10000000).toFixed(0)}Cr`
+                      : mktCap >= 100000000 ? `₹${(mktCap / 10000000).toFixed(1)}Cr`
+                        : '—'}
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={() => onSelectStock(w.symbol)} className="text-emerald-400 hover:text-emerald-300 text-xs font-medium transition-colors">View</button>
-                    <button onClick={() => remove(w.symbol)} className="text-red-400 hover:text-red-300 transition-colors"><X size={14}/></button>
+                    <button onClick={() => remove(w.symbol)} className="text-red-400 hover:text-red-300 transition-colors"><X size={14} /></button>
                   </div>
                 </div>
               );
@@ -1904,7 +1912,7 @@ const AIAssistantPage = () => {
         body: JSON.stringify({ message: text, session_id: sessionId })
       });
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
-    } catch(err) {
+    } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${err.message || 'Error — please try again.'}` }]);
     }
     setLoading(false);
@@ -1949,7 +1957,7 @@ const AIAssistantPage = () => {
         elements.push(
           <div key={i} className="flex items-start gap-2 text-[13px] text-slate-300 leading-relaxed mt-0.5">
             <span className="text-emerald-400 flex-shrink-0 mt-0.5">•</span>
-            <span dangerouslySetInnerHTML={{ __html: raw.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }}/>
+            <span dangerouslySetInnerHTML={{ __html: raw.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} />
           </div>
         );
       }
@@ -1960,23 +1968,23 @@ const AIAssistantPage = () => {
         elements.push(
           <div key={i} className="flex items-start gap-2 text-[13px] text-slate-300 leading-relaxed mt-0.5">
             <span className="text-emerald-400 font-bold flex-shrink-0 min-w-[16px] mt-0.5">{num}.</span>
-            <span dangerouslySetInnerHTML={{ __html: raw.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }}/>
+            <span dangerouslySetInnerHTML={{ __html: raw.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} />
           </div>
         );
       }
       // Horizontal rule ---
       else if (line.match(/^[-=]{3,}$/)) {
-        elements.push(<hr key={i} className="border-slate-700/50 my-2"/>);
+        elements.push(<hr key={i} className="border-slate-700/50 my-2" />);
       }
       // Empty line → small gap
       else if (line.trim() === '') {
-        elements.push(<div key={i} className="h-1"/>);
+        elements.push(<div key={i} className="h-1" />);
       }
       // Normal paragraph with possible inline **bold**
       else {
         elements.push(
           <p key={i} className="text-[13px] text-slate-300 leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }}/>
+            dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} />
         );
       }
       i++;
@@ -1996,7 +2004,7 @@ const AIAssistantPage = () => {
           <div className="text-slate-400 text-xs">Indian Stock Market Expert · Always learning</div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"/>
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-emerald-400 text-xs font-medium">Active</span>
         </div>
       </div>
@@ -2007,7 +2015,7 @@ const AIAssistantPage = () => {
           <div key={i} className={clsx('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
             {msg.role === 'assistant' && (
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mr-2 mt-0.5 shadow">
-                <Zap size={14} className="text-white"/>
+                <Zap size={14} className="text-white" />
               </div>
             )}
             <div className={clsx('max-w-[80%] rounded-2xl px-4 py-3',
@@ -2024,12 +2032,12 @@ const AIAssistantPage = () => {
         {loading && (
           <div className="flex justify-start">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center mr-2 shadow">
-              <Zap size={14} className="text-white"/>
+              <Zap size={14} className="text-white" />
             </div>
             <div className="bg-slate-800 border border-slate-700 rounded-2xl rounded-bl-sm px-4 py-3.5 flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }}/>
-              <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '160ms' }}/>
-              <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '320ms' }}/>
+              <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '160ms' }} />
+              <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '320ms' }} />
             </div>
           </div>
         )}
@@ -2050,7 +2058,7 @@ const AIAssistantPage = () => {
 
       {/* Status bar */}
       <div className="flex-shrink-0 mb-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl px-4 py-2.5 flex items-center gap-2">
-        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"/>
+        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
         <span className="text-emerald-300/80 text-xs font-medium">
           AI Active · Ask anything about Indian stocks, market analysis, or portfolio advice
         </span>
@@ -2064,7 +2072,7 @@ const AIAssistantPage = () => {
           className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all" />
         <button onClick={() => send()} disabled={loading || !input.trim()}
           className="px-5 py-3 bg-emerald-500 text-white rounded-xl hover:bg-emerald-400 transition-all disabled:opacity-50 flex items-center gap-2 font-semibold text-sm flex-shrink-0">
-          {loading ? <Spinner size={16}/> : <ArrowUpRight size={16}/>}
+          {loading ? <Spinner size={16} /> : <ArrowUpRight size={16} />}
           Send
         </button>
       </div>
@@ -2089,7 +2097,7 @@ const ProfilePage = () => {
       const data = await apiFetch('/auth/update-profile', { method: 'PUT', body: JSON.stringify(form) });
       updateUser(data.user);
       toast.success('Profile updated!');
-    } catch(err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message); }
     setSaving(false);
   };
 
@@ -2100,7 +2108,7 @@ const ProfilePage = () => {
       await apiFetch('/auth/change-password', { method: 'PUT', body: JSON.stringify(pwdForm) });
       toast.success('Password changed!');
       setPwdForm({ old_password: '', new_password: '' });
-    } catch(err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message); }
     setSaving(false);
   };
 
@@ -2130,14 +2138,14 @@ const ProfilePage = () => {
           <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
             <h3 className="text-white font-bold mb-4">Edit Profile</h3>
             <form onSubmit={saveProfile} className="space-y-4">
-              <Input label="Full Name" value={form.full_name} onChange={v => setForm(f => ({...f, full_name: v}))} />
-              <Input label="Phone" value={form.phone} onChange={v => setForm(f => ({...f, phone: v}))} placeholder="+91 98765 43210" />
-              <Input label="Investment Goal" value={form.investment_goal} onChange={v => setForm(f => ({...f, investment_goal: v}))} placeholder="e.g. Retirement in 2040" />
+              <Input label="Full Name" value={form.full_name} onChange={v => setForm(f => ({ ...f, full_name: v }))} />
+              <Input label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="+91 98765 43210" />
+              <Input label="Investment Goal" value={form.investment_goal} onChange={v => setForm(f => ({ ...f, investment_goal: v }))} placeholder="e.g. Retirement in 2040" />
               <div>
                 <label className="block text-xs text-slate-400 mb-1.5">Risk Profile</label>
                 <div className="grid grid-cols-3 gap-2">
-                  {['conservative','moderate','aggressive'].map(r => (
-                    <button key={r} type="button" onClick={() => setForm(f => ({...f, risk_profile: r}))}
+                  {['conservative', 'moderate', 'aggressive'].map(r => (
+                    <button key={r} type="button" onClick={() => setForm(f => ({ ...f, risk_profile: r }))}
                       className={clsx('py-2 rounded-lg text-xs font-semibold capitalize border transition-all',
                         form.risk_profile === r ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'border-slate-600 text-slate-400 hover:border-slate-500')}>
                       {r}
@@ -2146,7 +2154,7 @@ const ProfilePage = () => {
                 </div>
               </div>
               <button type="submit" disabled={saving} className="px-6 py-2.5 bg-emerald-500 text-white font-semibold rounded-xl hover:bg-emerald-400 transition-all flex items-center gap-2 disabled:opacity-50">
-                {saving ? <Spinner size={16}/> : <Check size={16}/>} Save Changes
+                {saving ? <Spinner size={16} /> : <Check size={16} />} Save Changes
               </button>
             </form>
           </div>
@@ -2155,10 +2163,10 @@ const ProfilePage = () => {
           <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
             <h3 className="text-white font-bold mb-4">Change Password</h3>
             <form onSubmit={changePassword} className="space-y-4">
-              <Input label="Current Password" type="password" value={pwdForm.old_password} onChange={v => setPwdForm(f => ({...f, old_password: v}))} required />
-              <Input label="New Password" type="password" value={pwdForm.new_password} onChange={v => setPwdForm(f => ({...f, new_password: v}))} placeholder="Min 6 characters" required />
+              <Input label="Current Password" type="password" value={pwdForm.old_password} onChange={v => setPwdForm(f => ({ ...f, old_password: v }))} required />
+              <Input label="New Password" type="password" value={pwdForm.new_password} onChange={v => setPwdForm(f => ({ ...f, new_password: v }))} placeholder="Min 6 characters" required />
               <button type="submit" disabled={saving} className="px-6 py-2.5 bg-indigo-500 text-white font-semibold rounded-xl hover:bg-indigo-400 transition-all disabled:opacity-50 flex items-center gap-2">
-                {saving ? <Spinner size={16}/> : <Shield size={16}/>} Update Password
+                {saving ? <Spinner size={16} /> : <Shield size={16} />} Update Password
               </button>
             </form>
           </div>
@@ -2170,7 +2178,7 @@ const ProfilePage = () => {
         <h3 className="text-red-400 font-bold mb-3">Sign Out</h3>
         <p className="text-slate-400 text-sm mb-4">You'll be logged out of your account.</p>
         <button onClick={logout} className="px-6 py-2.5 bg-red-500/20 border border-red-500/30 text-red-400 font-semibold rounded-xl hover:bg-red-500/30 transition-all flex items-center gap-2">
-          <LogOut size={16}/> Sign Out
+          <LogOut size={16} /> Sign Out
         </button>
       </div>
     </div>
@@ -2214,22 +2222,22 @@ const StocksPage = ({ onSelectStock }) => {
 
   // Hardcoded sector map (same as backend STOCK_SECTOR)
   const SECTOR = {
-    TCS:'IT',INFY:'IT',WIPRO:'IT',HCLTECH:'IT',TECHM:'IT',PERSISTENT:'IT',MPHASIS:'IT',LTIM:'IT',LTTS:'IT',OFSS:'IT',KPITTECH:'IT',HAPPSTMNDS:'IT',
-    HDFCBANK:'Banking',ICICIBANK:'Banking',SBIN:'Banking',KOTAKBANK:'Banking',AXISBANK:'Banking',INDUSINDBK:'Banking',BANKBARODA:'Banking',PNB:'Banking',CANBK:'Banking',FEDERALBNK:'Banking',BANDHANBNK:'Banking',IDFCFIRSTB:'Banking',UNIONBANK:'Banking',AUBANK:'Banking',
-    BAJFINANCE:'Finance',BAJAJFINSV:'Finance',HDFCAMC:'Finance',CHOLAFIN:'Finance',SBICARD:'Finance',PFC:'Finance',RECLTD:'Finance',LICHSGFIN:'Finance',SBILIFE:'Finance',HDFCLIFE:'Finance',ICICIGI:'Finance',ICICIPRULI:'Finance',CDSL:'Finance',JIOFIN:'Finance',IRFC:'Finance',LICI:'Finance',ABCAPITAL:'Finance',SHRIRAMFIN:'Finance',PAYTM:'Finance',POLICYBZR:'Finance',
-    SUNPHARMA:'Pharma',DRREDDY:'Pharma',CIPLA:'Pharma',DIVISLAB:'Pharma',LUPIN:'Pharma',BIOCON:'Pharma',TORNTPHARM:'Pharma',APOLLOHOSP:'Healthcare',FORTIS:'Healthcare',
-    MARUTI:'Auto',TATAMOTORS:'Auto',MM:'Auto','BAJAJ-AUTO':'Auto',HEROMOTOCO:'Auto',EICHERMOT:'Auto',TVSMOTOR:'Auto',BOSCHLTD:'Auto',MOTHERSON:'Auto',MRF:'Auto',TIINDIA:'Auto',SCHAEFFLER:'Auto',
-    RELIANCE:'Energy',ONGC:'Energy',BPCL:'Energy',IOC:'Energy',GAIL:'Energy',PETRONET:'Energy',COALINDIA:'Energy',NTPC:'Energy',POWERGRID:'Energy',TATAPOWER:'Energy',ADANIGREEN:'Energy',NHPC:'Energy',SJVN:'Energy',TORNTPOWER:'Energy',CESC:'Energy',IREDA:'Energy',IEX:'Energy',
-    HINDUNILVR:'FMCG',ITC:'FMCG',NESTLEIND:'FMCG',DABUR:'FMCG',MARICO:'FMCG',COLPAL:'FMCG',BRITANNIA:'FMCG',GODREJCP:'FMCG',TATACONSUM:'FMCG',
-    TATASTEEL:'Metals',JSWSTEEL:'Metals',HINDALCO:'Metals',VEDL:'Metals',SAIL:'Metals',NMDC:'Metals',APLAPOLLO:'Metals',JINDALSTEL:'Metals',
-    PIDILITIND:'Chemicals',DEEPAKNTR:'Chemicals',NAVINFLUOR:'Chemicals',SRF:'Chemicals',PIIND:'Chemicals',UPL:'Chemicals',SOLARINDS:'Chemicals',
-    LT:'Infra',ULTRACEMCO:'Infra',GRASIM:'Infra',AMBUJACEM:'Infra',HAL:'Defense',BEL:'Defense',CONCOR:'Logistics',RVNL:'Infra',RAILTEL:'Infra',IRCTC:'Logistics',POLYCAB:'Infra',CGPOWER:'Infra',THERMAX:'Infra',CUMMINSIND:'Infra',
-    TITAN:'Consumer',TRENT:'Consumer',DMART:'Consumer',PAGEIND:'Consumer',VOLTAS:'Consumer',HAVELLS:'Consumer',JUBLFOOD:'Consumer',NYKAA:'Consumer',ZOMATO:'Consumer',
-    DLF:'Real Estate',GODREJPROP:'Real Estate',OBEROIRLTY:'Real Estate',
-    BHARTIARTL:'Telecom',TATACOMM:'Telecom',HFCL:'Telecom',
-    SUNTV:'Media',ZEEL:'Media',PVRINOX:'Media',
-    INDIGO:'Logistics',DELHIVERY:'Logistics',
-    DIXON:'Technology',KAYNES:'Technology',NAUKRI:'Technology',TATAELXSI:'Technology',
+    TCS: 'IT', INFY: 'IT', WIPRO: 'IT', HCLTECH: 'IT', TECHM: 'IT', PERSISTENT: 'IT', MPHASIS: 'IT', LTIM: 'IT', LTTS: 'IT', OFSS: 'IT', KPITTECH: 'IT', HAPPSTMNDS: 'IT',
+    HDFCBANK: 'Banking', ICICIBANK: 'Banking', SBIN: 'Banking', KOTAKBANK: 'Banking', AXISBANK: 'Banking', INDUSINDBK: 'Banking', BANKBARODA: 'Banking', PNB: 'Banking', CANBK: 'Banking', FEDERALBNK: 'Banking', BANDHANBNK: 'Banking', IDFCFIRSTB: 'Banking', UNIONBANK: 'Banking', AUBANK: 'Banking',
+    BAJFINANCE: 'Finance', BAJAJFINSV: 'Finance', HDFCAMC: 'Finance', CHOLAFIN: 'Finance', SBICARD: 'Finance', PFC: 'Finance', RECLTD: 'Finance', LICHSGFIN: 'Finance', SBILIFE: 'Finance', HDFCLIFE: 'Finance', ICICIGI: 'Finance', ICICIPRULI: 'Finance', CDSL: 'Finance', JIOFIN: 'Finance', IRFC: 'Finance', LICI: 'Finance', ABCAPITAL: 'Finance', SHRIRAMFIN: 'Finance', PAYTM: 'Finance', POLICYBZR: 'Finance',
+    SUNPHARMA: 'Pharma', DRREDDY: 'Pharma', CIPLA: 'Pharma', DIVISLAB: 'Pharma', LUPIN: 'Pharma', BIOCON: 'Pharma', TORNTPHARM: 'Pharma', APOLLOHOSP: 'Healthcare', FORTIS: 'Healthcare',
+    MARUTI: 'Auto', TATAMOTORS: 'Auto', MM: 'Auto', 'BAJAJ-AUTO': 'Auto', HEROMOTOCO: 'Auto', EICHERMOT: 'Auto', TVSMOTOR: 'Auto', BOSCHLTD: 'Auto', MOTHERSON: 'Auto', MRF: 'Auto', TIINDIA: 'Auto', SCHAEFFLER: 'Auto',
+    RELIANCE: 'Energy', ONGC: 'Energy', BPCL: 'Energy', IOC: 'Energy', GAIL: 'Energy', PETRONET: 'Energy', COALINDIA: 'Energy', NTPC: 'Energy', POWERGRID: 'Energy', TATAPOWER: 'Energy', ADANIGREEN: 'Energy', NHPC: 'Energy', SJVN: 'Energy', TORNTPOWER: 'Energy', CESC: 'Energy', IREDA: 'Energy', IEX: 'Energy',
+    HINDUNILVR: 'FMCG', ITC: 'FMCG', NESTLEIND: 'FMCG', DABUR: 'FMCG', MARICO: 'FMCG', COLPAL: 'FMCG', BRITANNIA: 'FMCG', GODREJCP: 'FMCG', TATACONSUM: 'FMCG',
+    TATASTEEL: 'Metals', JSWSTEEL: 'Metals', HINDALCO: 'Metals', VEDL: 'Metals', SAIL: 'Metals', NMDC: 'Metals', APLAPOLLO: 'Metals', JINDALSTEL: 'Metals',
+    PIDILITIND: 'Chemicals', DEEPAKNTR: 'Chemicals', NAVINFLUOR: 'Chemicals', SRF: 'Chemicals', PIIND: 'Chemicals', UPL: 'Chemicals', SOLARINDS: 'Chemicals',
+    LT: 'Infra', ULTRACEMCO: 'Infra', GRASIM: 'Infra', AMBUJACEM: 'Infra', HAL: 'Defense', BEL: 'Defense', CONCOR: 'Logistics', RVNL: 'Infra', RAILTEL: 'Infra', IRCTC: 'Logistics', POLYCAB: 'Infra', CGPOWER: 'Infra', THERMAX: 'Infra', CUMMINSIND: 'Infra',
+    TITAN: 'Consumer', TRENT: 'Consumer', DMART: 'Consumer', PAGEIND: 'Consumer', VOLTAS: 'Consumer', HAVELLS: 'Consumer', JUBLFOOD: 'Consumer', NYKAA: 'Consumer', ZOMATO: 'Consumer',
+    DLF: 'Real Estate', GODREJPROP: 'Real Estate', OBEROIRLTY: 'Real Estate',
+    BHARTIARTL: 'Telecom', TATACOMM: 'Telecom', HFCL: 'Telecom',
+    SUNTV: 'Media', ZEEL: 'Media', PVRINOX: 'Media',
+    INDIGO: 'Logistics', DELHIVERY: 'Logistics',
+    DIXON: 'Technology', KAYNES: 'Technology', NAUKRI: 'Technology', TATAELXSI: 'Technology',
   };
 
   useEffect(() => {
@@ -2240,14 +2248,14 @@ const StocksPage = ({ onSelectStock }) => {
       if (top30.length) {
         setQuotesLoading(true);
         apiFetch('/stocks/batch-quotes', { method: 'POST', body: JSON.stringify({ symbols: top30 }) })
-          .then(q => setQuotes(q)).catch(() => {}).finally(() => setQuotesLoading(false));
+          .then(q => setQuotes(q)).catch(() => { }).finally(() => setQuotesLoading(false));
       }
     }).catch(() => setLoading(false));
 
     if (!isGuest) {
       apiFetch('/portfolio/').then(d => {
         if (d.portfolios?.length > 0) setPortfolioId(d.portfolios[0].id);
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, []);
 
@@ -2257,7 +2265,7 @@ const StocksPage = ({ onSelectStock }) => {
     try {
       await apiFetch('/watchlist/', { method: 'POST', body: JSON.stringify({ symbol, company_name }) });
       toast.success(`${symbol} added to watchlist`);
-    } catch(err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const quickPortfolio = async (e, symbol, company_name) => {
@@ -2280,7 +2288,7 @@ const StocksPage = ({ onSelectStock }) => {
       toast.success(`${actionStock.symbol} added to portfolio`);
       setActionStock(null);
       setBuyForm({ qty: '', price: '' });
-    } catch(err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message); }
     setBuyLoading(false);
   };
 
@@ -2298,13 +2306,13 @@ const StocksPage = ({ onSelectStock }) => {
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search all Indian stocks by name or symbol..."
             className="bg-transparent text-white text-sm outline-none flex-1 placeholder-slate-500" />
-          {search && <button onClick={() => setSearch('')}><X size={14} className="text-slate-500"/></button>}
+          {search && <button onClick={() => setSearch('')}><X size={14} className="text-slate-500" /></button>}
         </div>
         <div className="text-slate-400 text-sm">{filtered.length} stocks</div>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-48"><Spinner size={28} className="text-emerald-400"/></div>
+        <div className="flex items-center justify-center h-48"><Spinner size={28} className="text-emerald-400" /></div>
       ) : (
         <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden">
           <div className="grid grid-cols-6 gap-0 bg-slate-800 px-5 py-3 text-slate-400 text-xs font-semibold uppercase tracking-wider">
@@ -2336,26 +2344,26 @@ const StocksPage = ({ onSelectStock }) => {
                   {/* Price */}
                   <div className="text-white text-sm font-semibold">
                     {q?.current_price ? formatCurrency(q.current_price)
-                      : (quotesLoading ? <Spinner size={12} className="text-slate-500"/> : '—')}
+                      : (quotesLoading ? <Spinner size={12} className="text-slate-500" /> : '—')}
                   </div>
                   {/* Day Change */}
                   <div className={clsx('flex items-center gap-0.5 text-sm font-semibold',
                     !q ? 'text-slate-500' : isUp ? 'text-emerald-400' : 'text-red-400')}>
-                    {q ? (<>{isUp ? <ArrowUpRight size={14}/> : <ArrowDownRight size={14}/>}{isUp ? '+' : ''}{(q.change_percent||0).toFixed(2)}%</>) : '—'}
+                    {q ? (<>{isUp ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}{isUp ? '+' : ''}{(q.change_percent || 0).toFixed(2)}%</>) : '—'}
                   </div>
                   {/* Quick Add buttons */}
                   <div className="flex items-center gap-1.5">
                     <button title="Add to Watchlist" onClick={e => quickWatchlist(e, s.symbol, s.company_name)}
                       className="p-1.5 rounded-lg bg-slate-700/50 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300 transition-all">
-                      <Star size={13} fill="none"/>
+                      <Star size={13} fill="none" />
                     </button>
                     <button title="Add to Portfolio" onClick={e => quickPortfolio(e, s.symbol, s.company_name)}
                       className="p-1.5 rounded-lg bg-slate-700/50 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 transition-all">
-                      <Briefcase size={13}/>
+                      <Briefcase size={13} />
                     </button>
                     <button onClick={() => onSelectStock(s.symbol)}
                       className="p-1.5 rounded-lg bg-slate-700/50 text-slate-400 hover:bg-slate-600 hover:text-white transition-all">
-                      <ChevronRight size={13}/>
+                      <ChevronRight size={13} />
                     </button>
                   </div>
                 </div>
@@ -2374,12 +2382,12 @@ const StocksPage = ({ onSelectStock }) => {
                 <h2 className="text-white font-bold">Add to Portfolio</h2>
                 <p className="text-slate-400 text-sm">{actionStock.symbol} · {actionStock.company_name}</p>
               </div>
-              <button onClick={() => { setActionStock(null); setBuyForm({ qty: '', price: '' }); }} className="text-slate-400 hover:text-white"><X size={20}/></button>
+              <button onClick={() => { setActionStock(null); setBuyForm({ qty: '', price: '' }); }} className="text-slate-400 hover:text-white"><X size={20} /></button>
             </div>
             <div className="space-y-3">
-              <Input label="Quantity (shares)" type="number" value={buyForm.qty} onChange={v => setBuyForm(f => ({...f, qty: v}))} placeholder="e.g. 10" />
+              <Input label="Quantity (shares)" type="number" value={buyForm.qty} onChange={v => setBuyForm(f => ({ ...f, qty: v }))} placeholder="e.g. 10" />
               <Input label="Buy Price (₹)" type="number" value={buyForm.price}
-                onChange={v => setBuyForm(f => ({...f, price: v}))}
+                onChange={v => setBuyForm(f => ({ ...f, price: v }))}
                 placeholder={quotes[actionStock.symbol]?.current_price ? `Current: ₹${quotes[actionStock.symbol].current_price}` : 'Enter price'} />
               {buyForm.qty && buyForm.price && (
                 <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 text-sm">
@@ -2392,7 +2400,7 @@ const StocksPage = ({ onSelectStock }) => {
                   className="flex-1 py-2.5 border border-slate-600 text-slate-400 rounded-xl hover:bg-slate-800 text-sm font-semibold">Cancel</button>
                 <button onClick={handleQuickBuy} disabled={buyLoading}
                   className="flex-1 py-2.5 bg-emerald-500 text-white rounded-xl hover:bg-emerald-400 text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50">
-                  {buyLoading ? <Spinner size={14}/> : <Plus size={14}/>} Add
+                  {buyLoading ? <Spinner size={14} /> : <Plus size={14} />} Add
                 </button>
               </div>
             </div>
@@ -2408,11 +2416,11 @@ const StocksPage = ({ onSelectStock }) => {
 // ============================================================
 const PAGE_TITLES = {
   dashboard: 'Dashboard',
-  stocks:    'All Stocks',
+  stocks: 'All Stocks',
   portfolio: 'My Portfolio',
   watchlist: 'Watchlist',
-  ai:        'AI Assistant',
-  profile:   'Profile & Settings',
+  ai: 'AI Assistant',
+  profile: 'Profile & Settings',
 };
 
 // Auto-triggers guest login then redirects
@@ -2428,7 +2436,7 @@ const GuestRedirect = ({ onBack }) => {
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
-        <Spinner size={32} className="text-emerald-400"/>
+        <Spinner size={32} className="text-emerald-400" />
         <div className="text-white">Loading guest access…</div>
         <button onClick={onBack} className="text-slate-400 hover:text-white text-sm mt-2">← Back to home</button>
       </div>
@@ -2444,13 +2452,13 @@ const AppContent = () => {
   // 'landing' | 'login' | 'register' — shown only when not authenticated
   const [authView, setAuthView] = useState('landing');
 
-   // Reset authView when user logs out so GuestRedirect doesn't re-trigger guestLogin
+  // Reset authView when user logs out so GuestRedirect doesn't re-trigger guestLogin
   useEffect(() => {
     if (!user && !loading) {
       setAuthView('landing');
     }
   }, [user, loading]);
-  
+
   if (loading) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
@@ -2501,14 +2509,14 @@ const AppContent = () => {
     if (activeTab === 'stockDetail' && selectedStock) {
       return <StockDetail symbol={selectedStock} onBack={() => handleNavigation(prevTab || 'stocks')} />;
     }
-    switch(activeTab) {
+    switch (activeTab) {
       case 'dashboard': return <Dashboard onSelectStock={handleSelectStock} />;
-      case 'stocks':    return <StocksPage onSelectStock={handleSelectStock} />;
+      case 'stocks': return <StocksPage onSelectStock={handleSelectStock} />;
       case 'portfolio': return <PortfolioPage onSelectStock={handleSelectStock} />;
       case 'watchlist': return <WatchlistPage onSelectStock={handleSelectStock} />;
-      case 'ai':        return <AIAssistantPage />;
-      case 'profile':   return <ProfilePage />;
-      default:          return <Dashboard onSelectStock={handleSelectStock} />;
+      case 'ai': return <AIAssistantPage />;
+      case 'profile': return <ProfilePage />;
+      default: return <Dashboard onSelectStock={handleSelectStock} />;
     }
   };
 
