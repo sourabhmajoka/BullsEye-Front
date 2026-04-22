@@ -34,7 +34,8 @@ const apiFetch = async (path, options = {}) => {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (res.status === 401) {          // ✅ auto-logout on expired token
+  if (res.status === 401 && localStorage.getItem('bullseye_token')) {
+    // Only auto-logout if we had a token — means it expired mid-session
     localStorage.clear();
     window.location.reload();
     return;
