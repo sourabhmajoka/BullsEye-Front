@@ -54,13 +54,21 @@ const AuthProvider = ({ children }) => {
   useEffect(() => {
     const token = localStorage.getItem('bullseye_token');
     const saved = localStorage.getItem('bullseye_user');
-    if (token && saved) {
-      setUser(JSON.parse(saved));
-      apiFetch('/auth/me').then(d => {
-        setUser(d.user);
-        localStorage.setItem('bullseye_user', JSON.stringify(d.user));
-      }).catch(() => { localStorage.clear(); }).finally(() => setLoading(false));
-    } else setLoading(false);
+
+    if (token && saved && saved !== "undefined") {
+      try {
+        setUser(JSON.parse(saved));
+        apiFetch('/auth/me').then(d => {
+          setUser(d.user);
+          localStorage.setItem('bullseye_user', JSON.stringify(d.user));
+        }).catch(() => { localStorage.clear(); }).finally(() => setLoading(false));
+      }catch (error) {
+        localStorage.clear();
+        setLoading(false);
+      }
+    }else {
+      setLoading(false);
+    }
   }, []);
 
   const login = async (creds) => {
