@@ -42,8 +42,8 @@ const apiFetch = async (path, options = {}) => {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Network error' }));
     throw new Error(err.error || `HTTP ${res.status}`);
-    return res.json();
   }
+  return res.json();
 };
 
 // ============================================================
@@ -351,12 +351,16 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
         await login({ identifier: form.identifier, password: form.password });
         toast.success('Welcome back!');
       } else {
-        await register({
+        const result = await register({
           username: form.username, email: form.email,
           password: form.password, full_name: form.full_name,
           risk_profile: form.risk_profile
         });
-        toast.success('Account created! You can now sign in.');
+        if (result.email_sent) {
+          toast.success('Account created! Check your email to verify before signing in.');
+        } else {
+          toast.success('Account created! You can now sign in.');
+        }
       }
     } catch (err) {
       toast.error(err.message || 'Something went wrong');
@@ -409,11 +413,11 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
             )}
             {mode === 'register' && (
               <>
-                <Input label="Full Name" value={form.full_name}
+                <Input label="Full Name" value={form.full_name} autoComplete="name"
                   onChange={v => set('full_name', v)} placeholder="Rahul Sharma" />
-                <Input label="Username" value={form.username}
+                <Input label="Username" value={form.username} autoComplete="username"
                   onChange={v => set('username', v)} placeholder="rahul123" required />
-                <Input label="Email" type="email" value={form.email}
+                <Input label="Email" type="email" value={form.email} autoComplete="email"
                   onChange={v => set('email', v)} placeholder="rahul@example.com" required />
               </>
             )}
@@ -421,6 +425,7 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
             <div className="relative">
               <Input label="Password" type={showPwd ? 'text' : 'password'}
                 value={form.password} onChange={v => set('password', v)}
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
                 placeholder="Min 6 characters" required />
               <button type="button" onClick={() => setShowPwd(p => !p)}
                 className="absolute right-3 top-8 text-slate-400 hover:text-white">
@@ -500,10 +505,11 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
   );
 };
 
-const Input = ({ label, type = 'text', value, onChange, placeholder, required }) => (
+const Input = ({ label, type = 'text', value, onChange, placeholder, required, autoComplete }) => (
   <div>
     {label && <label className="block text-xs text-slate-400 mb-1.5">{label}</label>}
     <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} required={required}
+      autoComplete={autoComplete || (type === 'email' ? 'email' : type === 'password' ? 'current-password' : 'off')}
       className="w-full bg-slate-800 border border-slate-600 text-white rounded-xl px-4 py-2.5 text-sm placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all" />
   </div>
 );
@@ -729,7 +735,7 @@ const Dashboard = ({ onSelectStock }) => {
         })
         .catch(() => { });
     }
-  }, []);
+  }, [isGuest]);
 
   const sectorData = Object.entries(sectors).map(([name, change]) => ({
     name, change: parseFloat(change), fill: change >= 0 ? '#10b981' : '#ef4444'
@@ -2163,8 +2169,8 @@ const ProfilePage = () => {
           <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
             <h3 className="text-white font-bold mb-4">Change Password</h3>
             <form onSubmit={changePassword} className="space-y-4">
-              <Input label="Current Password" type="password" value={pwdForm.old_password} onChange={v => setPwdForm(f => ({ ...f, old_password: v }))} required />
-              <Input label="New Password" type="password" value={pwdForm.new_password} onChange={v => setPwdForm(f => ({ ...f, new_password: v }))} placeholder="Min 6 characters" required />
+              <Input label="Current Password" type="password" value={pwdForm.old_password} onChange={v => setPwdForm(f => ({ ...f, old_password: v }))} autoComplete="current-password" required />
+              <Input label="New Password" type="password" value={pwdForm.new_password} onChange={v => setPwdForm(f => ({ ...f, new_password: v }))} autoComplete="new-password" placeholder="Min 6 characters" required />
               <button type="submit" disabled={saving} className="px-6 py-2.5 bg-indigo-500 text-white font-semibold rounded-xl hover:bg-indigo-400 transition-all disabled:opacity-50 flex items-center gap-2">
                 {saving ? <Spinner size={16} /> : <Shield size={16} />} Update Password
               </button>
