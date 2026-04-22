@@ -2450,6 +2450,81 @@ const GuestRedirect = ({ onBack }) => {
   );
 };
 
+// ============================================================
+// EMAIL VERIFICATION PAGE
+// ============================================================
+const EmailVerificationPage = ({ token }) => {
+  const [status, setStatus] = useState('verifying'); // 'verifying' | 'success' | 'error'
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    apiFetch('/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token })
+    })
+      .then(data => {
+        setStatus('success');
+        setMessage(data.message || 'Email verified successfully!');
+        window.history.replaceState({}, document.title, '/');
+      })
+      .catch(err => {
+        setStatus('error');
+        setMessage(err.message || 'Verification failed. The link may have expired.');
+      });
+  }, [token]);
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-8 w-full max-w-md text-center shadow-2xl">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center mx-auto mb-5 shadow-lg shadow-emerald-500/30">
+          <TrendingUp size={26} className="text-white" />
+        </div>
+        <div className="text-white font-black text-2xl mb-1">BullsEye</div>
+        <div className="text-slate-400 text-sm mb-7">Email Verification</div>
+
+        {status === 'verifying' && (
+          <>
+            <Spinner size={32} className="text-emerald-400 mx-auto mb-3" />
+            <div className="text-slate-300 text-sm">Verifying your email address…</div>
+          </>
+        )}
+
+        {status === 'success' && (
+          <>
+            <div className="w-14 h-14 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
+              <Check size={28} className="text-emerald-400" />
+            </div>
+            <div className="text-white font-bold text-xl mb-2">Email Verified!</div>
+            <div className="text-slate-400 text-sm mb-6 leading-relaxed">{message}</div>
+            <button
+              onClick={() => window.location.href = '/'}
+              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold rounded-xl hover:from-emerald-400 hover:to-cyan-400 transition-all shadow-lg shadow-emerald-500/25"
+            >
+              Sign In to BullsEye
+            </button>
+          </>
+        )}
+
+        {status === 'error' && (
+          <>
+            <div className="w-14 h-14 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={28} className="text-red-400" />
+            </div>
+            <div className="text-white font-bold text-xl mb-2">Verification Failed</div>
+            <div className="text-slate-400 text-sm mb-6 leading-relaxed">{message}</div>
+            <button
+              onClick={() => window.location.href = '/'}
+              className="w-full py-3 border border-slate-600 text-slate-300 font-semibold rounded-xl hover:bg-slate-800 transition-all"
+            >
+              ← Back to Home
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const AppContent = () => {
   const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -2547,6 +2622,23 @@ const AppContent = () => {
 // ROOT
 // ============================================================
 export default function App() {
+  // Handle email verification link before anything else
+  const urlParams = new URLSearchParams(window.location.search);
+  const verifyToken = urlParams.get('token');
+  const isVerifyPath = window.location.pathname === '/verify-email';
+
+  if (isVerifyPath && verifyToken) {
+    return (
+      <ToastProvider>
+        <style>{`
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #020617; }
+        `}</style>
+        <EmailVerificationPage token={verifyToken} />
+      </ToastProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <ToastProvider>
