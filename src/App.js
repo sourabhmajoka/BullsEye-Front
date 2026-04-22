@@ -2444,6 +2444,13 @@ const AppContent = () => {
   // 'landing' | 'login' | 'register' — shown only when not authenticated
   const [authView, setAuthView] = useState('landing');
 
+   // Reset authView when user logs out so GuestRedirect doesn't re-trigger guestLogin
+  useEffect(() => {
+    if (!user && !loading) {
+      setAuthView('landing');
+    }
+  }, [user, loading]);
+  
   if (loading) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
