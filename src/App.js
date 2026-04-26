@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { TrendingUp, TrendingDown, Search, Bell, User, Settings, LogOut, Home, BarChart2, Briefcase, Star, MessageCircle, RefreshCw, Plus, Minus, X, ChevronRight, ChevronDown, ChevronUp, Info, Shield, Target, Activity, DollarSign, Globe, ArrowUpRight, ArrowDownRight, Zap, Eye, EyeOff, Menu, AlertCircle, Check, Loader } from 'lucide-react';
+import { TrendingUp, TrendingDown, Search, Bell, User, Settings, LogOut, Home, BarChart2, Briefcase, Star, MessageCircle, RefreshCw, Plus, Minus, X, ChevronRight, ChevronDown, ChevronUp, Info, Shield, Target, Activity, DollarSign, Globe, ArrowUpRight, ArrowDownRight, Zap, Eye, EyeOff, Menu, AlertCircle, Check, Loader, Sun, Moon } from 'lucide-react';
 
 // ============================================================
 // UTILITIES
@@ -34,17 +34,28 @@ const apiFetch = async (path, options = {}) => {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (res.status === 401 && localStorage.getItem('bullseye_token')) {
-    // Only auto-logout if we had a token — means it expired mid-session
+
+  // Only force-logout on 401 from protected routes.
+  // /auth/login and /auth/register legitimately return 401/403 for wrong
+  // credentials — clearing localStorage there would wipe a valid session.
+  const isAuthEndpoint = path.includes('/auth/login') ||
+                         path.includes('/auth/register') ||
+                         path.includes('/auth/guest');
+  if (res.status === 401 && localStorage.getItem('bullseye_token') && !isAuthEndpoint) {
     localStorage.clear();
     window.location.reload();
     return;
   }
+
+  const body = await res.json().catch(() => ({ error: 'Network error' }));
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Network error' }));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    // Attach the full body to the error so callers can read needs_verification, email, etc.
+    const err = new Error(body.error || `HTTP ${res.status}`);
+    err.data = body;
+    throw err;
   }
-  return res.json();
+  return body;
 };
 
 // ============================================================
@@ -63,11 +74,20 @@ const AuthProvider = ({ children }) => {
 
     if (token && saved && saved !== "undefined") {
       try {
-        setUser(JSON.parse(saved));
+        setUser(JSON.parse(saved)); // show app immediately from cache
         apiFetch('/auth/me').then(d => {
           setUser(d.user);
           localStorage.setItem('bullseye_user', JSON.stringify(d.user));
-        }).catch(() => { localStorage.clear(); setUser(null); }).finally(() => setLoading(false));
+        }).catch((err) => {
+          // Only clear session on a real 401 (invalid/expired token).
+          // Network errors, timeouts, 503s (Render waking up) must NOT
+          // log the user out — their cached session is still valid.
+          if (err?.message?.includes('401') || err?.status === 401) {
+            localStorage.clear();
+            setUser(null);
+          }
+          // Any other error: stay logged in with cached data
+        }).finally(() => setLoading(false));
       } catch (error) {
         localStorage.clear();
         setLoading(false);
@@ -79,17 +99,17 @@ const AuthProvider = ({ children }) => {
 
   const login = async (creds) => {
     const d = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(creds) });
+    // d.needs_verification means password was correct but email unverified
+    if (d.needs_verification) return d;
     localStorage.setItem('bullseye_token', d.token);
     localStorage.setItem('bullseye_user', JSON.stringify(d.user));
-    setUser(d.user); return d;
+    setUser(d.user);
+    return d;
   };
   const register = async (data) => {
     const d = await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data) });
-    if (d.token && d.user) {         // ✅ only persist if token exists (dev mode auto-verify)
-      localStorage.setItem('bullseye_token', d.token);
-      localStorage.setItem('bullseye_user', JSON.stringify(d.user));
-      setUser(d.user);
-    }
+    // Registration never returns a token — user must verify email first.
+    // Just return the response so the caller can show the verify screen.
     return d;
   };
   const guestLogin = async () => {
@@ -108,6 +128,36 @@ const AuthProvider = ({ children }) => {
     <AuthContext.Provider value={{ user, loading, isGuest: user?.is_guest, isAuth: !!user, login, register, guestLogin, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
+  );
+};
+
+// ============================================================
+// THEME CONTEXT
+// ============================================================
+const ThemeContext = createContext();
+const useTheme = () => useContext(ThemeContext);
+const ThemeProvider = ({ children }) => {
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('bullseye_theme');
+    return saved ? saved === 'dark' : true;
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  }, [isDark]);
+
+  const toggleTheme = () => {
+    setIsDark(prev => {
+      const next = !prev;
+      localStorage.setItem('bullseye_theme', next ? 'dark' : 'light');
+      return next;
+    });
+  };
+
+  return (
+    <ThemeContext.Provider value={{ isDark, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
   );
 };
 
@@ -324,8 +374,87 @@ const LandingPage = ({ onLogin, onRegister, onGuest }) => {
 // ============================================================
 // AUTH PAGE — Login / Signup
 // ============================================================
+// ============================================================
+// VERIFY EMAIL SCREEN
+// Shown after register OR when login returns needs_verification
+// ============================================================
+const VerifyEmailScreen = ({ email, onBack }) => {
+  const toast = useToast();
+  const [resending, setResending] = useState(false);
+  const [resent, setResent] = useState(false);
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      await apiFetch('/auth/resend-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+      setResent(true);
+      toast.success('Verification email resent! Check your inbox.');
+    } catch (err) {
+      toast.error(err.message || 'Failed to resend. Please try again.');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 flex items-center justify-center p-4">
+      <div className="relative w-full max-w-md text-center">
+        <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
+          {/* Icon */}
+          <div className="w-20 h-20 mx-auto mb-5 rounded-full bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 flex items-center justify-center">
+            <span className="text-4xl">📧</span>
+          </div>
+          <h2 className="text-2xl font-black text-white mb-2">Check your inbox</h2>
+          <p className="text-slate-400 text-sm mb-1">We sent a verification link to</p>
+          <p className="text-emerald-400 font-semibold mb-5">{email}</p>
+
+          <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 text-left mb-6 space-y-2">
+            {[
+              'Open the email from BullsEye',
+              'Click the "Verify My Email" button',
+              'You\'ll be signed in automatically',
+            ].map((step, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-6 h-6 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center flex-shrink-0">
+                  <span className="text-emerald-400 text-xs font-bold">{i + 1}</span>
+                </div>
+                <p className="text-slate-300 text-sm">{step}</p>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-slate-500 text-xs mb-4">
+            Can't find it? Check your spam folder.
+          </p>
+
+          {/* Resend button */}
+          <button
+            onClick={handleResend}
+            disabled={resending || resent}
+            className="w-full py-2.5 border border-slate-600 text-slate-300 font-semibold rounded-xl hover:bg-slate-800 transition-all flex items-center justify-center gap-2 mb-3 disabled:opacity-50"
+          >
+            {resending ? <Spinner size={16} /> : resent ? <Check size={16} className="text-emerald-400" /> : null}
+            {resent ? 'Email resent!' : resending ? 'Sending…' : '🔄 Resend verification email'}
+          </button>
+
+          <button
+            onClick={onBack}
+            className="text-slate-500 hover:text-slate-300 text-sm transition-colors"
+          >
+            ← Back to sign in
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AuthPage = ({ initialMode = 'login', onBack }) => {
   const [mode, setMode] = useState(initialMode);
+  const [pendingEmail, setPendingEmail] = useState(null); // set when verification needed
   const { login, register, guestLogin } = useAuth();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
@@ -344,26 +473,37 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
     aggressive: { emoji: '🚀', label: 'Aggressive', desc: 'High risk, high reward. Small/mid-cap growth stocks and momentum plays. 5+ year horizon.' },
   };
 
+  // Show the verify screen if we're waiting for email confirmation
+  if (pendingEmail) {
+    return <VerifyEmailScreen email={pendingEmail} onBack={() => setPendingEmail(null)} />;
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
       if (mode === 'login') {
-        await login({ identifier: form.identifier, password: form.password });
+        const result = await login({ identifier: form.identifier, password: form.password });
+        if (result?.needs_verification) {
+          setPendingEmail(result.email);
+          return;
+        }
         toast.success('Welcome back!');
       } else {
         const result = await register({
           username: form.username, email: form.email,
           password: form.password, full_name: form.full_name,
-          risk_profile: form.risk_profile
+          risk_profile: form.risk_profile,
         });
-        if (result.email_sent) {
-          toast.success('Account created! Check your email to verify before signing in.');
-        } else {
-          toast.success('Account created! You can now sign in.');
-        }
+        // Registration always requires verification — show the verify screen
+        setPendingEmail(result.email || form.email);
       }
     } catch (err) {
+      // 403 from login when email not verified — err.data has needs_verification + email
+      if (err.data?.needs_verification) {
+        setPendingEmail(err.data.email || (form.identifier.includes('@') ? form.identifier : form.email));
+        return;
+      }
       toast.error(err.message || 'Something went wrong');
     } finally {
       setLoading(false);
@@ -482,7 +622,7 @@ const AuthPage = ({ initialMode = 'login', onBack }) => {
             <div className="mt-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl px-4 py-2.5 flex items-start gap-2">
               <Check size={13} className="text-emerald-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-slate-400">
-                A <strong className="text-emerald-400">verification email</strong> will be sent to activate your account.
+                A <strong className="text-emerald-400">verification email</strong> will be sent — you must verify before signing in.
               </p>
             </div>
           )}
@@ -537,6 +677,18 @@ const getMarketStatus = () => {
 };
 
 // ============================================================
+const ThemeToggleButton = () => {
+  const { isDark, toggleTheme } = useTheme();
+  return (
+    <button
+      onClick={toggleTheme}
+      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      className="flex items-center justify-center w-9 h-9 rounded-xl border border-slate-700 text-slate-400 hover:text-white hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-all flex-shrink-0"
+    >
+      {isDark ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
+  );
+};
 const Sidebar = ({ activeTab, setActiveTab }) => {
   const { user, isGuest, logout } = useAuth();
   const navItems = [
@@ -591,10 +743,14 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       </nav>
 
       {/* Bottom */}
+      {/* Bottom */}
       <div className="p-4 border-t border-slate-800">
-        <button onClick={logout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:bg-red-500/10 hover:text-red-400 transition-all text-sm font-medium">
-          <LogOut size={18} /> Sign Out
-        </button>
+        <div className="flex items-center gap-2 mb-2">
+          <button onClick={logout} className="flex-1 flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:bg-red-500/10 hover:text-red-400 transition-all text-sm font-medium">
+            <LogOut size={18} /> Sign Out
+          </button>
+          <ThemeToggleButton />
+        </div>
         {isGuest && (
           <div className="mt-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-400">
             Register for full access to portfolio, watchlist & AI
@@ -670,6 +826,8 @@ const Header = ({ title, onSearch }) => {
             </div>
           );
         })()}
+        <div className="w-px h-6 bg-slate-700" />
+        <ThemeToggleButton />
       </div>
     </header>
   );
@@ -2457,22 +2615,35 @@ const GuestRedirect = ({ onBack }) => {
 const EmailVerificationPage = ({ token }) => {
   const [status, setStatus] = useState('verifying'); // 'verifying' | 'success' | 'error'
   const [message, setMessage] = useState('');
+  const [errorData, setErrorData] = useState(null);
+  const { updateUser } = useAuth();
 
   useEffect(() => {
     apiFetch('/auth/verify-email', {
       method: 'POST',
-      body: JSON.stringify({ token })
+      body: JSON.stringify({ token }),
     })
       .then(data => {
         setStatus('success');
-        setMessage(data.message || 'Email verified successfully!');
-        window.history.replaceState({}, document.title, '/');
+        setMessage(data.message || 'Email verified!');
+        // Auto-login: store the token & user, then redirect to the app
+        if (data.token && data.user) {
+          localStorage.setItem('bullseye_token', data.token);
+          localStorage.setItem('bullseye_user', JSON.stringify(data.user));
+          updateUser(data.user);
+        }
+        // Short pause so user sees the success message, then go to app
+        setTimeout(() => {
+          window.history.replaceState({}, document.title, '/');
+          window.location.reload();
+        }, 2000);
       })
       .catch(err => {
         setStatus('error');
         setMessage(err.message || 'Verification failed. The link may have expired.');
+        setErrorData(err.data || null);
       });
-  }, [token]);
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -2495,14 +2666,10 @@ const EmailVerificationPage = ({ token }) => {
             <div className="w-14 h-14 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
               <Check size={28} className="text-emerald-400" />
             </div>
-            <div className="text-white font-bold text-xl mb-2">Email Verified!</div>
-            <div className="text-slate-400 text-sm mb-6 leading-relaxed">{message}</div>
-            <button
-              onClick={() => window.location.href = '/'}
-              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold rounded-xl hover:from-emerald-400 hover:to-cyan-400 transition-all shadow-lg shadow-emerald-500/25"
-            >
-              Sign In to BullsEye
-            </button>
+            <div className="text-white font-bold text-xl mb-2">Email Verified! 🎉</div>
+            <div className="text-slate-400 text-sm mb-4 leading-relaxed">{message}</div>
+            <div className="text-slate-500 text-xs">Signing you in automatically…</div>
+            <Spinner size={20} className="text-emerald-400 mx-auto mt-3" />
           </>
         )}
 
@@ -2511,18 +2678,57 @@ const EmailVerificationPage = ({ token }) => {
             <div className="w-14 h-14 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
               <AlertCircle size={28} className="text-red-400" />
             </div>
-            <div className="text-white font-bold text-xl mb-2">Verification Failed</div>
+            <div className="text-white font-bold text-xl mb-2">
+              {errorData?.expired ? 'Link Expired' : 'Link Already Used'}
+            </div>
             <div className="text-slate-400 text-sm mb-6 leading-relaxed">{message}</div>
-            <button
-              onClick={() => window.location.href = '/'}
-              className="w-full py-3 border border-slate-600 text-slate-300 font-semibold rounded-xl hover:bg-slate-800 transition-all"
-            >
-              ← Back to Home
-            </button>
+            {errorData?.expired && errorData?.email ? (
+              /* Expired token — offer to resend */
+              <ResendFromError email={errorData.email} />
+            ) : (
+              /* Already used — just go sign in */
+              <button
+                onClick={() => window.location.href = '/'}
+                className="w-full py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold rounded-xl hover:from-emerald-400 hover:to-cyan-400 transition-all shadow-lg shadow-emerald-500/25"
+              >
+                Sign In
+              </button>
+            )}
           </>
         )}
       </div>
     </div>
+  );
+};
+
+/* Inline resend widget used by EmailVerificationPage when token is expired */
+const ResendFromError = ({ email }) => {
+  const toast = useToast();
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const handle = async () => {
+    setLoading(true);
+    try {
+      await apiFetch('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });
+      setSent(true);
+      toast.success('New verification email sent!');
+    } catch (err) {
+      toast.error(err.message || 'Failed to resend');
+    } finally {
+      setLoading(false);
+    }
+  };
+  if (sent) return (
+    <div className="text-emerald-400 font-semibold text-sm">
+      ✅ New link sent to {email} — check your inbox!
+    </div>
+  );
+  return (
+    <button onClick={handle} disabled={loading}
+      className="w-full py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold rounded-xl hover:from-emerald-400 hover:to-cyan-400 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+      {loading && <Spinner size={16} />}
+      🔄 Send New Verification Email
+    </button>
   );
 };
 
@@ -2636,29 +2842,32 @@ const AppContent = () => {
 // ROOT
 // ============================================================
 export default function App() {
-  // Handle email verification link before anything else
   const urlParams = new URLSearchParams(window.location.search);
   const verifyToken = urlParams.get('token');
   const isVerifyPath = window.location.pathname === '/verify-email';
 
   if (isVerifyPath && verifyToken) {
     return (
-      <ToastProvider>
-        <style>{`
-          * { box-sizing: border-box; }
-          body { margin: 0; background: #020617; }
-        `}</style>
-        <EmailVerificationPage token={verifyToken} />
-      </ToastProvider>
+      <ThemeProvider>
+        <ToastProvider>
+          <style>{`
+            * { box-sizing: border-box; }
+            body { margin: 0; background: #020617; }
+            [data-theme="light"] body { background: #f8fafc; }
+          `}</style>
+          <EmailVerificationPage token={verifyToken} />
+        </ToastProvider>
+      </ThemeProvider>
     );
   }
 
   return (
-    <AuthProvider>
-      <ToastProvider>
-        <style>{`
+    <ThemeProvider>
+      <AuthProvider>
+        <ToastProvider>
+          <style>{`
           * { box-sizing: border-box; }
-          body { margin: 0; background: #020617; }
+          body { margin: 0; background: #020617; transition: background 0.2s; }
           @keyframes slide-up {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
@@ -2668,9 +2877,52 @@ export default function App() {
           ::-webkit-scrollbar-track { background: #0f172a; }
           ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
           ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+          /* ─── LIGHT THEME ─── */
+          [data-theme="light"] body { background: #eef2f7 !important; }
+          [data-theme="light"] ::-webkit-scrollbar-track { background: #e2e8f0; }
+          [data-theme="light"] ::-webkit-scrollbar-thumb { background: #94a3b8; }
+
+          /* Backgrounds — slate-950/900 → white, slate-800 → light gray, slate-700 → border gray */
+          [data-theme="light"] .bg-slate-950 { background-color: #ffffff !important; }
+          [data-theme="light"] .bg-slate-900 { background-color: #ffffff !important; }
+          [data-theme="light"] .bg-slate-900\\/80 { background-color: rgba(255,255,255,0.95) !important; }  [data-theme="light"] .bg-slate-800 { background-color: #f1f5f9 !important; }
+          [data-theme="light"] .bg-slate-700 { background-color: #e2e8f0 !important; }
+          [data-theme="light"] .bg-slate-700\/50 { background-color: rgba(226,232,240,0.6) !important; }
+
+          /* Borders */
+          [data-theme="light"] .border-slate-800 { border-color: #e2e8f0 !important; }
+          [data-theme="light"] .border-slate-700 { border-color: #e2e8f0 !important; }
+          [data-theme="light"] .border-slate-700\/50 { border-color: rgba(226,232,240,0.9) !important; }
+          [data-theme="light"] .border-slate-600 { border-color: #cbd5e1 !important; }
+
+          /* Text */
+          [data-theme="light"] .text-white { color: #1e293b !important; }
+          [data-theme="light"] .text-slate-300 { color: #334155 !important; }
+          [data-theme="light"] .text-slate-400 { color: #475569 !important; }
+          [data-theme="light"] .text-slate-500 { color: #94a3b8 !important; }
+
+          /* Hover states */
+          [data-theme="light"] .hover\\:bg-slate-800:hover { background-color: #f1f5f9 !important; }
+          [data-theme="light"] .hover\\:bg-slate-700:hover { background-color: #e2e8f0 !important; }
+          [data-theme="light"] .hover\\:text-white:hover { color: #0f172a !important; }
+
+          /* Inputs and textareas */
+          [data-theme="light"] input { color: #1e293b !important; }
+          [data-theme="light"] input::placeholder { color: #94a3b8 !important; }
+          [data-theme="light"] textarea { color: #1e293b !important; }
+          [data-theme="light"] .placeholder-slate-500::placeholder { color: #94a3b8 !important; }
+
+          /* Card depth — subtle shadow so white cards lift off the gray page */
+          [data-theme="light"] .border.rounded-xl,
+          [data-theme="light"] .border.rounded-2xl,
+          [data-theme="light"] .border.rounded-3xl {
+            box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04);
+          }
         `}</style>
-        <AppContent />
-      </ToastProvider>
-    </AuthProvider>
+          <AppContent />
+        </ToastProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

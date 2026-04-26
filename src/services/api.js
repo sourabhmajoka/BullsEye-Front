@@ -14,11 +14,18 @@ api.interceptors.request.use(config => {
   return config;
 });
 
-// Response interceptor
+// Response interceptor — only force-logout on 401s from protected routes.
+// Never auto-logout on /auth/login or /auth/register (those legitimately
+// return 401 for wrong passwords, not for expired sessions).
 api.interceptors.response.use(
   res => res,
   err => {
-    if (err.response?.status === 401) {
+    const url = err.config?.url || '';
+    const isAuthEndpoint = url.includes('/auth/login') ||
+                           url.includes('/auth/register') ||
+                           url.includes('/auth/guest');
+    if (err.response?.status === 401 && !isAuthEndpoint) {
+      // Token is genuinely expired/invalid — clear and redirect
       localStorage.removeItem('bullseye_token');
       localStorage.removeItem('bullseye_user');
       window.location.href = '/login';
