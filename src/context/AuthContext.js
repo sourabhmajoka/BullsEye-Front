@@ -44,7 +44,7 @@ export const AuthProvider = ({ children }) => {
     } else {
       setLoading(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const login = async (credentials) => {
     const res = await authAPI.login(credentials);

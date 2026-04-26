@@ -2643,7 +2643,7 @@ const EmailVerificationPage = ({ token }) => {
         setMessage(err.message || 'Verification failed. The link may have expired.');
         setErrorData(err.data || null);
       });
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token]);
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
