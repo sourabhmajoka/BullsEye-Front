@@ -39,8 +39,8 @@ const apiFetch = async (path, options = {}) => {
   // /auth/login and /auth/register legitimately return 401/403 for wrong
   // credentials — clearing localStorage there would wipe a valid session.
   const isAuthEndpoint = path.includes('/auth/login') ||
-                         path.includes('/auth/register') ||
-                         path.includes('/auth/guest');
+    path.includes('/auth/register') ||
+    path.includes('/auth/guest');
   if (res.status === 401 && localStorage.getItem('bullseye_token') && !isAuthEndpoint) {
     localStorage.clear();
     window.location.reload();
@@ -1824,7 +1824,16 @@ const PortfolioPage = ({ onSelectStock }) => {
                 ))}
               </div>
               <div className="bg-slate-800/50 rounded-xl p-4">
-                <pre className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap font-sans">{aiAnalysis.analysis}</pre>
+                <div className="space-y-0.5">
+                  {aiAnalysis.analysis.split('\n').map((line, i) => {
+                    if (line.startsWith('### ')) return <div key={i} className="font-bold text-white text-sm mt-3 mb-1 border-b border-slate-700/50 pb-1">{line.replace(/^### /, '').replace(/\*\*(.*?)\*\*/g, '$1')}</div>;
+                    if (line.startsWith('## ')) return <div key={i} className="font-bold text-emerald-400 text-base mt-3 mb-1">{line.replace(/^## /, '').replace(/\*\*(.*?)\*\*/g, '$1')}</div>;
+                    if (line.match(/^\d+\.\s/)) { const num = line.match(/^(\d+)\.\s/)[1]; const raw = line.replace(/^\d+\.\s/, ''); return <div key={i} className="flex items-start gap-2 text-[13px] text-slate-300 leading-relaxed mt-0.5"><span className="text-emerald-400 font-bold flex-shrink-0 min-w-[16px] mt-0.5">{num}.</span><span dangerouslySetInnerHTML={{ __html: raw.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} /></div>; }
+                    if (line.match(/^[\-•]\s/)) { const raw = line.replace(/^\s*[\-•]\s/, ''); return <div key={i} className="flex items-start gap-2 text-[13px] text-slate-300 leading-relaxed mt-0.5"><span className="text-emerald-400 flex-shrink-0 mt-0.5">•</span><span dangerouslySetInnerHTML={{ __html: raw.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} /></div>; }
+                    if (line.trim() === '') return <div key={i} className="h-1" />;
+                    return <p key={i} className="text-[13px] text-slate-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} />;
+                  })}
+                </div>           
               </div>
               <button onClick={handleAIAnalysis}
                 className="mt-4 flex items-center gap-2 text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
@@ -2158,7 +2167,7 @@ const AIAssistantPage = () => {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-180px)]">
+    <div className="flex flex-col h-[calc(100vh-80px)]">
       {/* Header */}
       <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-4 mb-4 flex items-center gap-3 flex-shrink-0">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center shadow-lg">
@@ -2753,7 +2762,7 @@ const AppContent = () => {
       setGuestLoading(false);
     }
   };
-  
+
   if (loading) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
@@ -2766,7 +2775,7 @@ const AppContent = () => {
     </div>
   );
 
-   // Not logged in — show landing or auth form
+  // Not logged in — show landing or auth form
   if (!user) {
     if (authView === 'landing') {
       if (guestLoading) {
