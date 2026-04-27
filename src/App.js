@@ -2625,7 +2625,6 @@ const EmailVerificationPage = ({ token }) => {
   const [status, setStatus] = useState('verifying'); // 'verifying' | 'success' | 'error'
   const [message, setMessage] = useState('');
   const [errorData, setErrorData] = useState(null);
-  const { updateUser } = useAuth();
 
   useEffect(() => {
     apiFetch('/auth/verify-email', {
@@ -2639,7 +2638,6 @@ const EmailVerificationPage = ({ token }) => {
         if (data.token && data.user) {
           localStorage.setItem('bullseye_token', data.token);
           localStorage.setItem('bullseye_user', JSON.stringify(data.user));
-          updateUser(data.user);
         }
         // Short pause so user sees the success message, then go to app
         setTimeout(() => {
@@ -2855,17 +2853,19 @@ export default function App() {
   const verifyToken = urlParams.get('token');
   const isVerifyPath = window.location.pathname === '/verify-email';
 
-  if (isVerifyPath && verifyToken) {
+   if (isVerifyPath && verifyToken) {
     return (
       <ThemeProvider>
-        <ToastProvider>
-          <style>{`
-            * { box-sizing: border-box; }
-            body { margin: 0; background: #020617; }
-            [data-theme="light"] body { background: #f8fafc; }
-          `}</style>
-          <EmailVerificationPage token={verifyToken} />
-        </ToastProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <style>{`
+              * { box-sizing: border-box; }
+              body { margin: 0; background: #020617; }
+              [data-theme="light"] body { background: #f8fafc; }
+            `}</style>
+            <EmailVerificationPage token={verifyToken} />
+          </ToastProvider>
+        </AuthProvider>
       </ThemeProvider>
     );
   }
