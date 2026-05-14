@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { TrendingUp, TrendingDown, Search, Bell, User, Settings, LogOut, Home, BarChart2, Briefcase, Star, MessageCircle, RefreshCw, Plus, Minus, X, ChevronRight, ChevronDown, ChevronUp, Info, Shield, Target, Activity, DollarSign, Globe, ArrowUpRight, ArrowDownRight, Zap, Eye, EyeOff, Menu, AlertCircle, Check, Loader, Sun, Moon } from 'lucide-react';
+import { TrendingUp, TrendingDown, Search, Bell, User, Settings, LogOut, Home, BarChart2, Briefcase, Star, MessageCircle, RefreshCw, Plus, Minus, X, ChevronRight, ChevronDown, ChevronUp, Info, Shield, Target, Activity, DollarSign, Globe, ArrowUpRight, ArrowDownRight, Zap, Eye, EyeOff, Menu, AlertCircle, Check, Loader, Sun, Moon, Trash2 } from 'lucide-react';
 
 // ============================================================
 // UTILITIES
@@ -723,7 +723,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-white text-sm font-semibold truncate">{user?.full_name || user?.username}</div>
-            <div className="text-slate-500 text-xs">{isGuest ? 'Guest User' : user?.email?.split('@')[0]}</div>
+            <div className="text-slate-500 text-xs truncate">{isGuest ? 'Guest User' : `@${user?.username}`}</div>
           </div>
           {isGuest && <span className="bg-amber-500/20 text-amber-400 text-[10px] px-2 py-0.5 rounded-full font-medium">Guest</span>}
         </div>
@@ -1536,6 +1536,7 @@ const PortfolioPage = ({ onSelectStock }) => {
   const [editLoading, setEditLoading] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [valueMode, setValueMode] = useState('current'); // 'current' | 'invested'
 
   const loadPortfolio = async (id) => {
     try {
@@ -1689,7 +1690,14 @@ const PortfolioPage = ({ onSelectStock }) => {
                 <div>Qty</div>
                 <div>Avg Price</div>
                 <div>Current</div>
-                <div>Value</div>
+                <button
+                  onClick={() => setValueMode(m => m === 'current' ? 'invested' : 'current')}
+                  className="text-left flex items-center gap-1 group hover:text-emerald-400 transition-colors"
+                  title="Click to toggle between Current Value and Invested Value"
+                >
+                  {valueMode === 'current' ? 'Value' : 'Invested'}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="opacity-60 group-hover:opacity-100 flex-shrink-0"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+                </button>
                 <div>Day P&amp;L</div>
                 <div>Total P&amp;L</div>
                 <div>Actions</div>
@@ -1704,7 +1712,11 @@ const PortfolioPage = ({ onSelectStock }) => {
                     <div className="text-slate-300 text-sm">{h.quantity}</div>
                     <div className="text-slate-300 text-sm">{formatCurrency(h.avg_buy_price)}</div>
                     <div className="text-slate-300 text-sm">{formatCurrency(h.current_price)}</div>
-                    <div className="text-white font-semibold text-sm">{formatCurrency(h.current_value)}</div>
+                    <div className="text-white font-semibold text-sm">
+                      {valueMode === 'current'
+                        ? formatCurrency(h.current_value)
+                        : formatCurrency(h.quantity * h.avg_buy_price)}
+                    </div>
                     <div className={clsx('text-sm font-semibold', (h.day_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                       {(h.day_pnl || 0) >= 0 ? '+' : ''}{formatCurrency(h.day_pnl || 0)}
                       <span className="text-xs opacity-70 block">({(h.change_percent || 0) >= 0 ? '+' : ''}{formatNum(h.change_percent || 0)}%)</span>
@@ -2263,6 +2275,9 @@ const ProfilePage = () => {
   const [form, setForm] = useState({ full_name: user?.full_name || '', phone: user?.phone || '', risk_profile: user?.risk_profile || 'moderate', investment_goal: user?.investment_goal || '' });
   const [pwdForm, setPwdForm] = useState({ old_password: '', new_password: '' });
   const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const saveProfile = async (e) => {
     e.preventDefault();
@@ -2286,6 +2301,19 @@ const ProfilePage = () => {
     setSaving(false);
   };
 
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) { toast.error('Please enter your password to confirm'); return; }
+    setDeleteLoading(true);
+    try {
+      await apiFetch('/auth/delete-account', { method: 'DELETE', body: JSON.stringify({ password: deletePassword }) });
+      toast.success('Account deleted. Goodbye!');
+      logout();
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete account');
+      setDeleteLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-2xl">
       {/* Profile Header */}
@@ -2295,6 +2323,7 @@ const ProfilePage = () => {
         </div>
         <div>
           <div className="text-white font-bold text-xl">{user?.full_name || user?.username}</div>
+          <div className="text-slate-500 text-sm font-medium">@{user?.username}</div>
           <div className="text-slate-400 text-sm">{user?.email}</div>
           <div className="flex items-center gap-2 mt-1">
             <span className={clsx('text-xs px-2 py-0.5 rounded-full font-medium',
@@ -2347,14 +2376,44 @@ const ProfilePage = () => {
         </>
       )}
 
-      {/* Danger Zone */}
-      <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-6">
-        <h3 className="text-red-400 font-bold mb-3">Sign Out</h3>
-        <p className="text-slate-400 text-sm mb-4">You'll be logged out of your account.</p>
-        <button onClick={logout} className="px-6 py-2.5 bg-red-500/20 border border-red-500/30 text-red-400 font-semibold rounded-xl hover:bg-red-500/30 transition-all flex items-center gap-2">
-          <LogOut size={16} /> Sign Out
-        </button>
-      </div>
+      {/* Delete Account */}
+      {!isGuest && (
+        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-6">
+          <h3 className="text-red-400 font-bold mb-1">Delete Account</h3>
+          <p className="text-slate-400 text-sm mb-4">
+            Permanently delete your account, portfolio, watchlist, and all data. This cannot be undone.
+            Your username and email will be freed for others to use.
+          </p>
+          {!deleteConfirm ? (
+            <button onClick={() => setDeleteConfirm(true)}
+              className="px-6 py-2.5 bg-red-500/20 border border-red-500/30 text-red-400 font-semibold rounded-xl hover:bg-red-500/30 transition-all flex items-center gap-2">
+              <Trash2 size={16} /> Delete My Account
+            </button>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-red-300 text-sm font-medium">Enter your password to confirm deletion:</p>
+              <Input
+                label="Password"
+                type="password"
+                value={deletePassword}
+                onChange={v => setDeletePassword(v)}
+                placeholder="Your current password"
+                autoComplete="current-password"
+              />
+              <div className="flex gap-3">
+                <button onClick={() => { setDeleteConfirm(false); setDeletePassword(''); }}
+                  className="flex-1 py-2.5 border border-slate-600 text-slate-400 rounded-xl hover:bg-slate-800 text-sm font-semibold transition-all">
+                  Cancel
+                </button>
+                <button onClick={handleDeleteAccount} disabled={deleteLoading || !deletePassword}
+                  className="flex-1 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-400 text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50 transition-all">
+                  {deleteLoading ? <Spinner size={14} /> : <Trash2 size={14} />} Confirm Delete
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -2366,6 +2425,7 @@ const StocksPage = ({ onSelectStock }) => {
   const { isGuest } = useAuth();
   const toast = useToast();
   const [allStocks, setAllStocks] = useState([]);
+  const [topMovers, setTopMovers] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -2415,16 +2475,35 @@ const StocksPage = ({ onSelectStock }) => {
   };
 
   useEffect(() => {
+    // Fetch full stock list (used only when user is searching)
     apiFetch('/stocks/list').then(d => {
       setAllStocks(d.stocks || []);
       setLoading(false);
-      const top30 = (d.stocks || []).slice(0, 30).map(s => s.symbol);
-      if (top30.length) {
-        setQuotesLoading(true);
-        apiFetch('/stocks/batch-quotes', { method: 'POST', body: JSON.stringify({ symbols: top30 }) })
-          .then(q => setQuotes(q)).catch(() => { }).finally(() => setQuotesLoading(false));
-      }
     }).catch(() => setLoading(false));
+
+    // Fetch top movers — already carry live price + change data, no batch-quote needed
+    setQuotesLoading(true);
+    apiFetch('/market/movers').then(d => {
+      const gainers = (d.gainers || []);
+      const losers = (d.losers || []);
+      const combined = [...gainers, ...losers];
+      // Deduplicate by symbol
+      const seen = new Set();
+      const unique = combined.filter(s => {
+        if (seen.has(s.symbol)) return false;
+        seen.add(s.symbol);
+        return true;
+      });
+      // Sort by absolute % change so biggest movers appear first
+      unique.sort((a, b) => Math.abs(b.change_percent) - Math.abs(a.change_percent));
+      setTopMovers(unique.slice(0, 15));
+      // Populate quotes map so price/change renders for these stocks
+      const q = {};
+      unique.forEach(s => {
+        q[s.symbol] = { current_price: s.price, change_percent: s.change_percent, change: s.change };
+      });
+      setQuotes(q);
+    }).catch(() => { }).finally(() => setQuotesLoading(false));
 
     if (!isGuest) {
       apiFetch('/portfolio/').then(d => {
@@ -2466,15 +2545,19 @@ const StocksPage = ({ onSelectStock }) => {
     setBuyLoading(false);
   };
 
-  const filtered = allStocks.filter(s =>
-    !search ||
-    s.symbol.toLowerCase().includes(search.toLowerCase()) ||
-    s.company_name.toLowerCase().includes(search.toLowerCase())
-  );
+  const searchActive = search.trim().length > 0;
+
+  // When searching: filter full stock list. When not: show today's top movers.
+  const displayList = searchActive
+    ? allStocks.filter(s =>
+        s.symbol.toLowerCase().includes(search.toLowerCase()) ||
+        s.company_name.toLowerCase().includes(search.toLowerCase())
+      )
+    : topMovers.map(s => ({ symbol: s.symbol, company_name: s.company_name }));
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-4">
+    <div className="flex flex-col h-full gap-5">
+      <div className="flex items-center gap-4 flex-shrink-0">
         <div className="flex-1 flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5">
           <Search size={16} className="text-slate-400" />
           <input value={search} onChange={e => setSearch(e.target.value)}
@@ -2482,22 +2565,35 @@ const StocksPage = ({ onSelectStock }) => {
             className="bg-transparent text-white text-sm outline-none flex-1 placeholder-slate-500" />
           {search && <button onClick={() => setSearch('')}><X size={14} className="text-slate-500" /></button>}
         </div>
-        <div className="text-slate-400 text-sm">{filtered.length} stocks</div>
+        {searchActive && (
+          <div className="text-slate-400 text-sm whitespace-nowrap">{displayList.length} stocks</div>
+        )}
       </div>
 
-      {loading ? (
+      {loading && !searchActive ? (
         <div className="flex items-center justify-center h-48"><Spinner size={28} className="text-emerald-400" /></div>
       ) : (
-        <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden">
-          <div className="grid grid-cols-6 gap-0 bg-slate-800 px-5 py-3 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+        <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0">
+          {/* Section header */}
+          {!searchActive && (
+            <div className="px-5 py-3 border-b border-slate-700/50 flex items-center gap-2 flex-shrink-0">
+              <span className="text-white font-semibold text-sm">Top Movers Today</span>
+              <span className="text-slate-500 text-xs">· by % change</span>
+              {quotesLoading && <Spinner size={12} className="text-slate-400 ml-1" />}
+            </div>
+          )}
+          <div className="grid grid-cols-6 gap-0 bg-slate-800 px-5 py-3 text-slate-400 text-xs font-semibold uppercase tracking-wider flex-shrink-0">
             <div className="col-span-2">Symbol / Company</div>
             <div>Sector</div>
             <div>Price</div>
             <div>Day Change</div>
             <div>Quick Add</div>
           </div>
-          <div className="divide-y divide-slate-800 max-h-[640px] overflow-y-auto">
-            {filtered.map(s => {
+          <div className="divide-y divide-slate-800 overflow-y-auto flex-1 min-h-0">
+            {displayList.length === 0 && searchActive && (
+              <div className="px-5 py-10 text-center text-slate-500 text-sm">No stocks found for "{search}"</div>
+            )}
+            {displayList.map(s => {
               const q = quotes[s.symbol];
               const isUp = (q?.change_percent || 0) >= 0;
               const sector = SECTOR[s.symbol] || '—';
@@ -2833,11 +2929,11 @@ const AppContent = () => {
     : (PAGE_TITLES[activeTab] || '');
 
   return (
-    <div className="flex bg-slate-950 min-h-screen">
+    <div className="flex bg-slate-950 h-screen overflow-hidden">
       <Sidebar activeTab={activeTab} setActiveTab={handleNavigation} />
-      <div className="flex-1 ml-64 flex flex-col min-h-screen">
+      <div className="flex-1 ml-64 flex flex-col h-screen overflow-hidden">
         <Header title={title} onSearch={r => handleSelectStock(r.symbol)} />
-        <main className="flex-1 p-6 overflow-auto">
+        <main className="flex-1 p-6 overflow-y-auto min-h-0">
           {renderPage()}
         </main>
       </div>
