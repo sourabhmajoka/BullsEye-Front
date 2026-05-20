@@ -797,6 +797,7 @@ const Header = ({ title, onSearch }) => {
             <input value={query} onChange={e => { setQuery(e.target.value); setShow(true); }}
               onFocus={() => setShow(true)} onBlur={() => setTimeout(() => setShow(false), 200)}
               placeholder="Search stocks (TCS, RELIANCE...)"
+              autoComplete="off"
               className="bg-transparent text-white text-sm outline-none flex-1 placeholder-slate-500 w-full" />
             {query && <button onClick={() => { setQuery(''); setResults([]); }}><X size={14} className="text-slate-500" /></button>}
           </div>
@@ -1696,7 +1697,7 @@ const PortfolioPage = ({ onSelectStock }) => {
                   title="Click to toggle between Current Value and Invested Value"
                 >
                   {valueMode === 'current' ? 'Value' : 'Invested'}
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="opacity-60 group-hover:opacity-100 flex-shrink-0"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="opacity-60 group-hover:opacity-100 flex-shrink-0"><path d="M7 16V4m0 0L3 8m4-4l4 4" /><path d="M17 8v12m0 0l4-4m-4 4l-4-4" /></svg>
                 </button>
                 <div>Day P&amp;L</div>
                 <div>Total P&amp;L</div>
@@ -1845,7 +1846,7 @@ const PortfolioPage = ({ onSelectStock }) => {
                     if (line.trim() === '') return <div key={i} className="h-1" />;
                     return <p key={i} className="text-[13px] text-slate-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>') }} />;
                   })}
-                </div>           
+                </div>
               </div>
               <button onClick={handleAIAnalysis}
                 className="mt-4 flex items-center gap-2 text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
@@ -2398,7 +2399,7 @@ const ProfilePage = () => {
                 value={deletePassword}
                 onChange={v => setDeletePassword(v)}
                 placeholder="Your current password"
-                autoComplete="current-password"
+                autoComplete="off"
               />
               <div className="flex gap-3">
                 <button onClick={() => { setDeleteConfirm(false); setDeletePassword(''); }}
@@ -2550,9 +2551,9 @@ const StocksPage = ({ onSelectStock }) => {
   // When searching: filter full stock list. When not: show today's top movers.
   const displayList = searchActive
     ? allStocks.filter(s =>
-        s.symbol.toLowerCase().includes(search.toLowerCase()) ||
-        s.company_name.toLowerCase().includes(search.toLowerCase())
-      )
+      s.symbol.toLowerCase().includes(search.toLowerCase()) ||
+      s.company_name.toLowerCase().includes(search.toLowerCase())
+    )
     : topMovers.map(s => ({ symbol: s.symbol, company_name: s.company_name }));
 
   return (
@@ -2949,7 +2950,7 @@ export default function App() {
   const verifyToken = urlParams.get('token');
   const isVerifyPath = window.location.pathname === '/verify-email';
 
-   if (isVerifyPath && verifyToken) {
+  if (isVerifyPath && verifyToken) {
     return (
       <ThemeProvider>
         <AuthProvider>
