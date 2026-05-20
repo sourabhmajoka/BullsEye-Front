@@ -27,7 +27,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // ============================================================
 // CONFIG
 // ============================================================
-const API_BASE = 'https://bullseye-back.onrender.com/api';
+const API_BASE = 'http://localhost:5000/api';
 
 const apiFetch = async (path, options = {}) => {
   const token = localStorage.getItem('bullseye_token');
@@ -51,6 +51,23 @@ const apiFetch = async (path, options = {}) => {
 
   if (!res.ok) {
     // Attach the full body to the error so callers can read needs_verification, email, etc.
+    const err = new Error(body.error || `HTTP ${res.status}`);
+    err.data = body;
+    throw err;
+  }
+  return body;
+};
+
+// ============================================================
+// ADMIN API HELPER
+// ============================================================
+const adminFetch = async (path, options = {}) => {
+  const token = localStorage.getItem('bullseye_admin_token');
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const body = await res.json().catch(() => ({ error: 'Network error' }));
+  if (!res.ok) {
     const err = new Error(body.error || `HTTP ${res.status}`);
     err.data = body;
     throw err;
@@ -2836,6 +2853,791 @@ const ResendFromError = ({ email }) => {
   );
 };
 
+// ============================================================
+// ADMIN LOGIN PAGE
+// ============================================================
+const AdminLoginPage = ({ onSuccess }) => {
+  const toast = useToast();
+  const [form, setForm] = useState({ username: '', password: '' });
+  const [loading, setLoading] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const data = await adminFetch('/admin/login', {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+      localStorage.setItem('bullseye_admin_token', data.token);
+      toast.success('Admin access granted');
+      onSuccess();
+    } catch (err) {
+      toast.error(err.message || 'Invalid credentials');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center shadow-lg">
+              <Shield size={22} className="text-white" />
+            </div>
+            <span className="text-3xl font-black text-white">BullsEye</span>
+          </div>
+          <p className="text-slate-400 text-sm">Admin Dashboard Access</p>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
+          <div className="flex items-center gap-2 mb-6 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+            <AlertCircle size={16} className="text-red-400 flex-shrink-0" />
+            <p className="text-red-400 text-xs font-medium">Restricted area — authorised personnel only</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <Input
+              label="Admin Username"
+              value={form.username}
+              onChange={v => setForm(f => ({ ...f, username: v }))}
+              placeholder="Enter admin username"
+              autoComplete="off"
+              required
+            />
+            <div className="relative">
+              <Input
+                label="Admin Password"
+                type={showPwd ? 'text' : 'password'}
+                value={form.password}
+                onChange={v => setForm(f => ({ ...f, password: v }))}
+                placeholder="Enter admin password"
+                autoComplete="off"
+                required
+              />
+              <button type="button" onClick={() => setShowPwd(p => !p)}
+                className="absolute right-3 top-8 text-slate-400 hover:text-white">
+                {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            <button type="submit" disabled={loading}
+              className="w-full py-3 bg-gradient-to-r from-red-500 to-orange-500 text-white font-bold rounded-xl hover:from-red-400 hover:to-orange-400 transition-all disabled:opacity-50 flex items-center justify-center gap-2 mt-2">
+              {loading ? <Spinner size={18} /> : <Shield size={18} />}
+              Access Dashboard
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+// ADMIN DASHBOARD
+// ============================================================
+const AdminDashboard = ({ onLogout }) => {
+  const toast = useToast();
+  const [activeTab, setActiveTab] = useState('overview');
+  const [stats, setStats] = useState(null);
+  const [trend, setTrend] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [popularStocks, setPopularStocks] = useState({ most_held: [], most_watched: [] });
+  const [loading, setLoading] = useState(true);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [searchUser, setSearchUser] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [userDetail, setUserDetail] = useState(null);
+  const [userDetailLoading, setUserDetailLoading] = useState(false);
+  const [showBanForm, setShowBanForm] = useState(false);
+  const [banForm, setBanForm] = useState({ reason: '', duration_days: '7' });
+  const [banLoading, setBanLoading] = useState(false);
+  const [appStats, setAppStats] = useState(null);
+  const [appStatsLoading, setAppStatsLoading] = useState(false);
+
+  useEffect(() => {
+    loadOverview();
+    loadAppStats();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'users' && users.length === 0) loadUsers();
+    if (activeTab === 'stocks' && popularStocks.most_held.length === 0) loadStocks();
+  }, [activeTab]);
+
+  const loadOverview = async () => {
+    setLoading(true);
+    try {
+      const [s, t] = await Promise.all([
+        adminFetch('/admin/stats'),
+        adminFetch('/admin/signup-trend'),
+      ]);
+      setStats(s);
+      setTrend(t.trend || []);
+    } catch (err) {
+      if (err.message.includes('403') || err.message.includes('401')) {
+        toast.error('Session expired — please login again');
+        onLogout();
+      } else {
+        toast.error('Failed to load stats');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const data = await adminFetch('/admin/users');
+      setUsers(data.users || []);
+    } catch { toast.error('Failed to load users'); }
+    finally { setUsersLoading(false); }
+  };
+
+  const loadStocks = async () => {
+    try {
+      const data = await adminFetch('/admin/popular-stocks');
+      setPopularStocks(data);
+    } catch { toast.error('Failed to load stock data'); }
+  };
+
+  const loadAppStats = async () => {
+    setAppStatsLoading(true);
+    try {
+      const data = await adminFetch('/admin/app-stats');
+      setAppStats(data);
+    } catch { toast.error('Failed to load app stats'); }
+    finally { setAppStatsLoading(false); }
+  };
+
+  const loadUserDetail = async (userId) => {
+    setUserDetailLoading(true);
+    try {
+      const data = await adminFetch(`/admin/users/${userId}/detail`);
+      setUserDetail(data);
+    } catch { toast.error('Failed to load user details'); }
+    finally { setUserDetailLoading(false); }
+  };
+
+  const handleBanUser = async () => {
+    if (!userDetail) return;
+    setBanLoading(true);
+    try {
+      await adminFetch(`/admin/users/${userDetail.user.id}/ban`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: banForm.reason,
+          duration_days: banForm.duration_days === 'manual' ? null : parseInt(banForm.duration_days),
+        }),
+      });
+      toast.success(`@${userDetail.user.username} has been suspended`);
+      setShowBanForm(false);
+      setBanForm({ reason: '', duration_days: '7' });
+      await loadUserDetail(userDetail.user.id);
+      loadUsers();
+    } catch (err) { toast.error(err.message); }
+    finally { setBanLoading(false); }
+  };
+
+  const handleUnbanUser = async (userId, username) => {
+    try {
+      await adminFetch(`/admin/users/${userId}/unban`, { method: 'POST' });
+      toast.success(`@${username} has been reinstated`);
+      await loadUserDetail(userId);
+      loadUsers();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleManualVerify = async (userId, username) => {
+    try {
+      await adminFetch(`/admin/users/${userId}/verify`, { method: 'POST' });
+      toast.success(`@${username} manually verified`);
+      await loadUserDetail(userId);
+      loadUsers();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleExportCSV = async () => {
+    try {
+      const token = localStorage.getItem('bullseye_admin_token');
+      const res = await fetch(`${API_BASE}/admin/export-users`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'bullseye_users.csv';
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('CSV downloaded!');
+    } catch { toast.error('Export failed'); }
+  };
+
+  const handleDeleteUser = async (userId, username) => {
+    try {
+      await adminFetch(`/admin/users/${userId}`, { method: 'DELETE' });
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      toast.success(`User @${username} deleted`);
+      setDeleteConfirm(null);
+      // Refresh stats
+      const s = await adminFetch('/admin/stats');
+      setStats(s);
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleResendVerification = async (userId, email) => {
+    try {
+      await adminFetch(`/admin/users/${userId}/resend-verification`, { method: 'POST' });
+      toast.success(`Verification email sent to ${email}`);
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const filteredUsers = users.filter(u =>
+    !searchUser ||
+    u.username.toLowerCase().includes(searchUser.toLowerCase()) ||
+    u.email.toLowerCase().includes(searchUser.toLowerCase()) ||
+    u.full_name?.toLowerCase().includes(searchUser.toLowerCase())
+  );
+
+  const tabs = [
+    { id: 'overview', label: '📊 Overview' },
+    { id: 'users', label: '👥 Users' },
+    { id: 'stocks', label: '📈 Stocks' },
+  ];
+
+  return (
+    <div className="min-h-screen bg-slate-950">
+      {/* Top Bar */}
+      <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between sticky top-0 z-30">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center">
+            <Shield size={16} className="text-white" />
+          </div>
+          <div>
+            <span className="text-white font-black text-lg">BullsEye</span>
+            <span className="text-red-400 text-sm font-semibold ml-2">Admin</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex gap-1 bg-slate-800 rounded-xl p-1">
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)}
+                className={clsx('px-4 py-2 rounded-lg text-sm font-semibold transition-all',
+                  activeTab === t.id ? 'bg-red-500 text-white' : 'text-slate-400 hover:text-white')}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={onLogout}
+            className="flex items-center gap-2 px-4 py-2 border border-slate-600 text-slate-400 hover:text-red-400 hover:border-red-500/50 rounded-xl text-sm font-medium transition-all">
+            <LogOut size={14} /> Logout
+          </button>
+        </div>
+      </header>
+
+      <main className="p-6 max-w-7xl mx-auto">
+
+        {/* ── OVERVIEW TAB ── */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            {loading ? (
+              <div className="flex items-center justify-center h-64">
+                <Spinner size={32} className="text-red-400" />
+              </div>
+            ) : stats && (
+              <>
+                {/* User stat cards */}
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    { label: 'Total Users', val: stats.users.total, color: 'text-white', sub: 'registered accounts' },
+                    { label: 'Verified Users', val: stats.users.verified, color: 'text-emerald-400', sub: `${Math.round((stats.users.verified / (stats.users.total || 1)) * 100)}% of total` },
+                    { label: 'Unverified Users', val: stats.users.unverified, color: 'text-amber-400', sub: 'pending verification' },
+                  ].map(c => (
+                    <div key={c.label} className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                      <div className="text-slate-400 text-xs font-medium mb-2">{c.label}</div>
+                      <div className={clsx('text-3xl font-black', c.color)}>{c.val}</div>
+                      <div className="text-slate-500 text-xs mt-1">{c.sub}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* New signups */}
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    { label: 'New Today', val: stats.users.new_today },
+                    { label: 'New This Week', val: stats.users.new_week },
+                    { label: 'New This Month', val: stats.users.new_month },
+                  ].map(c => (
+                    <div key={c.label} className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                      <div className="text-slate-400 text-xs font-medium mb-2">{c.label}</div>
+                      <div className="text-2xl font-black text-cyan-400">{c.val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* App usage */}
+                <div className="grid grid-cols-4 gap-4">
+                  {[
+                    { label: 'Portfolios', val: stats.app.total_portfolios, icon: '💼' },
+                    { label: 'Holdings', val: stats.app.total_holdings, icon: '📊' },
+                    { label: 'Watchlists', val: stats.app.total_watchlist, icon: '⭐' },
+                    { label: 'AI Chats', val: stats.app.total_ai_chats, icon: '🤖' },
+                  ].map(c => (
+                    <div key={c.label} className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                      <div className="text-2xl mb-2">{c.icon}</div>
+                      <div className="text-slate-400 text-xs font-medium mb-1">{c.label}</div>
+                      <div className="text-2xl font-black text-white">{c.val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Signup trend chart */}
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-white font-bold">Signup Trend — Last 30 Days</h2>
+                    <button onClick={loadOverview} className="text-slate-400 hover:text-white transition-colors">
+                      <RefreshCw size={16} />
+                    </button>
+                  </div>
+                  {trend.length === 0 ? (
+                    <div className="h-48 flex items-center justify-center text-slate-500 text-sm">No signup data yet</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={240}>
+                      <AreaChart data={trend}>
+                        <defs>
+                          <linearGradient id="adminGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                        <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 11 }} tickLine={false} />
+                        <YAxis tick={{ fill: '#64748b', fontSize: 11 }} tickLine={false} allowDecimals={false} />
+                        <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', color: '#fff' }}
+                          formatter={v => [v, 'Signups']} />
+                        <Area type="monotone" dataKey="signups" stroke="#ef4444" strokeWidth={2} fill="url(#adminGrad)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                {/* App Stats Over Time */}
+                {(appStatsLoading || appStats) && (
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                      <h2 className="text-white font-bold mb-4 flex items-center gap-2">
+                        📊 Holdings Added — Last 30 Days
+                        {appStatsLoading && <Spinner size={14} className="text-slate-400" />}
+                      </h2>
+                      {!appStats || appStats.holdings_trend.length === 0 ? (
+                        <div className="h-48 flex items-center justify-center text-slate-500 text-sm">No data yet</div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height={200}>
+                          <BarChart data={appStats.holdings_trend}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                            <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} />
+                            <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} allowDecimals={false} />
+                            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', color: '#fff' }}
+                              formatter={v => [v, 'Holdings Added']} />
+                            <Bar dataKey="count" fill="#10b981" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                    <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                      <h2 className="text-white font-bold mb-4 flex items-center gap-2">
+                        🤖 AI Queries — Last 30 Days
+                        {appStatsLoading && <Spinner size={14} className="text-slate-400" />}
+                      </h2>
+                      {!appStats || appStats.ai_trend.length === 0 ? (
+                        <div className="h-48 flex items-center justify-center text-slate-500 text-sm">No data yet</div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height={200}>
+                          <BarChart data={appStats.ai_trend}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                            <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} />
+                            <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} allowDecimals={false} />
+                            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', color: '#fff' }}
+                              formatter={v => [v, 'AI Queries']} />
+                            <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── USERS TAB ── */}
+        {activeTab === 'users' && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="flex-1 flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5">
+                <Search size={16} className="text-slate-400" />
+                <input value={searchUser} onChange={e => setSearchUser(e.target.value)}
+                  placeholder="Search by name, username or email..."
+                  autoComplete="off"
+                  className="bg-transparent text-white text-sm outline-none flex-1 placeholder-slate-500" />
+                {searchUser && <button onClick={() => setSearchUser('')}><X size={14} className="text-slate-500" /></button>}
+              </div>
+              <div className="text-slate-400 text-sm">{filteredUsers.length} users</div>
+              <button onClick={loadUsers} className="text-slate-400 hover:text-white transition-colors p-2" title="Refresh">
+                <RefreshCw size={16} />
+              </button>
+              <button onClick={handleExportCSV}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-sm font-semibold hover:bg-emerald-500/20 transition-all"
+                title="Export CSV">
+                ⬇ Export CSV
+              </button>
+            </div>
+
+            {usersLoading ? (
+              <div className="flex items-center justify-center h-48"><Spinner size={28} className="text-red-400" /></div>
+            ) : (
+              <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden">
+                <div className="grid grid-cols-12 gap-0 bg-slate-800 px-5 py-3 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+                  <div className="col-span-3">User</div>
+                  <div className="col-span-2">Email</div>
+                  <div>Status</div>
+                  <div>Risk</div>
+                  <div>Holdings</div>
+                  <div>Watchlist</div>
+                  <div>AI Chats</div>
+                  <div>Joined / Last Active</div>
+                  <div>Actions</div>
+                </div>
+                <div className="divide-y divide-slate-800 max-h-[600px] overflow-y-auto">
+                  {filteredUsers.length === 0 ? (
+                    <div className="py-12 text-center text-slate-500 text-sm">No users found</div>
+                  ) : filteredUsers.map(u => (
+                    <div key={u.id}
+                      onClick={() => { setSelectedUser(u); loadUserDetail(u.id); setShowBanForm(false); }}
+                      className={clsx('grid grid-cols-12 gap-0 px-5 py-3.5 transition-colors items-center cursor-pointer',
+                        u.is_banned ? 'bg-red-500/5 hover:bg-red-500/10' : 'hover:bg-slate-800/30')}>
+                      <div className="col-span-3">
+                        <div className="flex items-center gap-2">
+                          <div className="text-white font-semibold text-sm">{u.full_name || u.username}</div>
+                          {u.is_banned && <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-medium">Banned</span>}
+                        </div>
+                        <div className="text-slate-500 text-xs">@{u.username}</div>
+                      </div>
+                      <div className="col-span-2">
+                        <div className="text-slate-300 text-xs truncate max-w-[160px]">{u.email}</div>
+                      </div>
+                      <div>
+                        <span className={clsx('text-xs px-2 py-0.5 rounded-full font-medium',
+                          u.is_verified ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}>
+                          {u.is_verified ? '✓ Verified' : '⏳ Pending'}
+                        </span>
+                      </div>
+                      <div><span className="text-slate-400 text-xs capitalize">{u.risk_profile}</span></div>
+                      <div className="text-slate-300 text-sm font-semibold">{u.holdings}</div>
+                      <div className="text-slate-300 text-sm font-semibold">{u.watchlist}</div>
+                      <div className="text-slate-300 text-sm font-semibold">{u.ai_chats}</div>
+                      <div className="text-slate-500 text-xs">
+                        <div>{u.created_at ? new Date(u.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}</div>
+                        <div className={clsx('text-[10px] mt-0.5', u.last_login ? 'text-slate-500' : 'text-slate-600')}>
+                          {u.last_login ? new Date(u.last_login).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : 'Never active'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                        {!u.is_verified && (
+                          <button onClick={() => handleResendVerification(u.id, u.email)}
+                            title="Resend verification email"
+                            className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-all">
+                            <RefreshCw size={12} />
+                          </button>
+                        )}
+                        <button onClick={() => setDeleteConfirm(u)}
+                          title="Delete user"
+                          className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── STOCKS TAB ── */}
+        {activeTab === 'stocks' && (
+          <div className="grid grid-cols-2 gap-6">
+            <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+              <h2 className="text-white font-bold mb-4">📊 Most Held Stocks</h2>
+              {popularStocks.most_held.length === 0 ? (
+                <div className="text-slate-500 text-sm text-center py-8">No data yet</div>
+              ) : (
+                <div className="space-y-3">
+                  {popularStocks.most_held.map((s, i) => (
+                    <div key={s.symbol} className="flex items-center gap-3">
+                      <span className="text-slate-500 text-xs w-5">{i + 1}.</span>
+                      <div className="flex-1">
+                        <div className="flex justify-between mb-1">
+                          <span className="text-white text-sm font-semibold">{s.symbol}</span>
+                          <span className="text-slate-400 text-xs">{s.count} users</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div className="h-full bg-emerald-400 rounded-full"
+                            style={{ width: `${(s.count / popularStocks.most_held[0].count) * 100}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+              <h2 className="text-white font-bold mb-4">⭐ Most Watchlisted Stocks</h2>
+              {popularStocks.most_watched.length === 0 ? (
+                <div className="text-slate-500 text-sm text-center py-8">No data yet</div>
+              ) : (
+                <div className="space-y-3">
+                  {popularStocks.most_watched.map((s, i) => (
+                    <div key={s.symbol} className="flex items-center gap-3">
+                      <span className="text-slate-500 text-xs w-5">{i + 1}.</span>
+                      <div className="flex-1">
+                        <div className="flex justify-between mb-1">
+                          <span className="text-white text-sm font-semibold">{s.symbol}</span>
+                          <span className="text-slate-400 text-xs">{s.count} users</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-400 rounded-full"
+                            style={{ width: `${(s.count / popularStocks.most_watched[0].count) * 100}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* Delete Confirm Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center mx-auto mb-3">
+                <Trash2 size={22} className="text-red-400" />
+              </div>
+              <h2 className="text-white font-bold text-lg">Delete User?</h2>
+              <p className="text-slate-400 text-sm mt-1">
+                This will permanently delete <strong className="text-white">@{deleteConfirm.username}</strong> and all their data.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteConfirm(null)}
+                className="flex-1 py-2.5 border border-slate-600 text-slate-400 rounded-xl hover:bg-slate-800 text-sm font-semibold transition-all">
+                Cancel
+              </button>
+              <button onClick={() => handleDeleteUser(deleteConfirm.id, deleteConfirm.username)}
+                className="flex-1 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-400 text-sm font-semibold transition-all">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Detail Modal */}
+      {selectedUser && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white font-black text-xl">
+                  {selectedUser.full_name?.[0] || selectedUser.username?.[0] || 'U'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-white font-bold text-lg">{selectedUser.full_name || selectedUser.username}</div>
+                    {selectedUser.is_banned && <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-medium">Suspended</span>}
+                  </div>
+                  <div className="text-slate-500 text-sm">@{selectedUser.username}</div>
+                </div>
+              </div>
+              <button onClick={() => { setSelectedUser(null); setUserDetail(null); setShowBanForm(false); }}
+                className="text-slate-400 hover:text-white"><X size={20} /></button>
+            </div>
+
+            {userDetailLoading ? (
+              <div className="flex items-center justify-center py-16"><Spinner size={28} className="text-red-400" /></div>
+            ) : userDetail && (
+              <div className="p-6 space-y-5">
+
+                {/* Profile Info Grid */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    ['Email', userDetail.user.email],
+                    ['Risk Profile', userDetail.user.risk_profile],
+                    ['Investment Goal', userDetail.user.investment_goal || '—'],
+                    ['Phone', userDetail.user.phone || '—'],
+                    ['Joined', userDetail.user.created_at ? new Date(userDetail.user.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'],
+                    ['Last Active', userDetail.user.last_login ? new Date(userDetail.user.last_login).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Never'],
+                  ].map(([label, val]) => (
+                    <div key={label} className="bg-slate-800 rounded-xl p-3">
+                      <div className="text-slate-500 text-xs mb-1">{label}</div>
+                      <div className="text-white text-sm font-semibold break-all capitalize">{val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Usage Stats */}
+                <div>
+                  <h3 className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-3">Usage</h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: 'Holdings', val: userDetail.holdings.length, icon: '📊' },
+                      { label: 'Watchlist', val: userDetail.watchlist.length, icon: '⭐' },
+                      { label: 'AI Chats', val: userDetail.ai_chats, icon: '🤖' },
+                    ].map(c => (
+                      <div key={c.label} className="bg-slate-800 rounded-xl p-3 text-center">
+                        <div className="text-2xl mb-1">{c.icon}</div>
+                        <div className="text-white font-bold text-xl">{c.val}</div>
+                        <div className="text-slate-500 text-xs">{c.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Holdings List */}
+                {userDetail.holdings.length > 0 && (
+                  <div>
+                    <h3 className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-3">Portfolio Holdings</h3>
+                    <div className="bg-slate-800 rounded-xl overflow-hidden divide-y divide-slate-700 max-h-48 overflow-y-auto">
+                      {userDetail.holdings.map(h => (
+                        <div key={h.symbol} className="flex items-center justify-between px-4 py-2.5">
+                          <div>
+                            <div className="text-white text-sm font-semibold">{h.symbol}</div>
+                            <div className="text-slate-500 text-xs">{h.company_name}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-slate-300 text-sm">{h.quantity} shares</div>
+                            <div className="text-slate-500 text-xs">avg ₹{h.avg_buy_price?.toFixed(2)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Verification */}
+                <div className="bg-slate-800 rounded-xl p-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-white font-semibold text-sm">Email Verification</div>
+                    <div className={clsx('text-xs mt-0.5', userDetail.user.is_verified ? 'text-emerald-400' : 'text-amber-400')}>
+                      {userDetail.user.is_verified ? '✓ Verified' : '⏳ Pending verification'}
+                    </div>
+                  </div>
+                  {!userDetail.user.is_verified && (
+                    <button onClick={() => handleManualVerify(userDetail.user.id, userDetail.user.username)}
+                      className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-semibold hover:bg-emerald-500/30 transition-all">
+                      ✓ Manually Verify
+                    </button>
+                  )}
+                </div>
+
+                {/* Ban / Suspend Section */}
+                <div className={clsx('rounded-xl p-4 border',
+                  userDetail.user.is_banned ? 'bg-red-500/5 border-red-500/20' : 'bg-slate-800 border-slate-700')}>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-white font-semibold text-sm">Account Status</div>
+                      {userDetail.user.is_banned ? (
+                        <div className="text-red-400 text-xs mt-0.5">
+                          🚫 Suspended
+                          {userDetail.user.banned_until
+                            ? ` until ${new Date(userDetail.user.banned_until).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                            : ' — Manual (admin must lift)'}
+                        </div>
+                      ) : (
+                        <div className="text-emerald-400 text-xs mt-0.5">✅ Active</div>
+                      )}
+                    </div>
+                    {userDetail.user.is_banned ? (
+                      <button onClick={() => handleUnbanUser(userDetail.user.id, userDetail.user.username)}
+                        className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-semibold hover:bg-emerald-500/30 transition-all">
+                        ✓ Reinstate Account
+                      </button>
+                    ) : (
+                      <button onClick={() => setShowBanForm(v => !v)}
+                        className="px-4 py-2 bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl text-xs font-semibold hover:bg-red-500/30 transition-all">
+                        🚫 Suspend Account
+                      </button>
+                    )}
+                  </div>
+
+                  {userDetail.user.ban_reason && (
+                    <div className="mt-2 text-xs text-slate-400">
+                      <span className="text-slate-300 font-medium">Reason: </span>{userDetail.user.ban_reason}
+                    </div>
+                  )}
+
+                  {/* Ban Form */}
+                  {showBanForm && !userDetail.user.is_banned && (
+                    <div className="mt-4 pt-4 border-t border-slate-700 space-y-3">
+                      <div>
+                        <label className="text-slate-400 text-xs mb-1.5 block">Suspension Duration</label>
+                        <select value={banForm.duration_days}
+                          onChange={e => setBanForm(f => ({ ...f, duration_days: e.target.value }))}
+                          className="w-full bg-slate-700 border border-slate-600 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-red-500">
+                          <option value="1">1 Day</option>
+                          <option value="3">3 Days</option>
+                          <option value="7">7 Days</option>
+                          <option value="14">14 Days (2 Weeks)</option>
+                          <option value="30">30 Days (1 Month)</option>
+                          <option value="90">90 Days (3 Months)</option>
+                          <option value="manual">Manual — Admin must lift</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-slate-400 text-xs mb-1.5 block">Reason (optional)</label>
+                        <input type="text" value={banForm.reason}
+                          onChange={e => setBanForm(f => ({ ...f, reason: e.target.value }))}
+                          placeholder="e.g. Violation of terms of service"
+                          className="w-full bg-slate-700 border border-slate-600 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-red-500 placeholder-slate-500" />
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => setShowBanForm(false)}
+                          className="flex-1 py-2 border border-slate-600 text-slate-400 rounded-xl text-xs font-semibold hover:bg-slate-700 transition-all">
+                          Cancel
+                        </button>
+                        <button onClick={handleBanUser} disabled={banLoading}
+                          className="flex-1 py-2 bg-red-500 text-white rounded-xl text-xs font-semibold hover:bg-red-400 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50">
+                          {banLoading && <Spinner size={12} />}
+                          Confirm Suspension
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AppContent = () => {
   const { user, loading, guestLogin } = useAuth();
   const toast = useToast();
@@ -2943,23 +3745,40 @@ const AppContent = () => {
 };
 
 // ============================================================
+// ADMIN APP — manages admin login state
+// ============================================================
+const AdminApp = () => {
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(
+    () => !!localStorage.getItem('bullseye_admin_token')
+  );
+
+  const handleLogout = () => {
+    localStorage.removeItem('bullseye_admin_token');
+    setIsAdminLoggedIn(false);
+  };
+
+  if (!isAdminLoggedIn) {
+    return <AdminLoginPage onSuccess={() => setIsAdminLoggedIn(true)} />;
+  }
+  return <AdminDashboard onLogout={handleLogout} />;
+};
+
+// ============================================================
 // ROOT
 // ============================================================
 export default function App() {
   const urlParams = new URLSearchParams(window.location.search);
   const verifyToken = urlParams.get('token');
   const isVerifyPath = window.location.pathname === '/verify-email';
+  const isAdminPath = window.location.pathname === '/admin';
 
+  // ── Email verification page ──────────────────────────────
   if (isVerifyPath && verifyToken) {
     return (
       <ThemeProvider>
         <AuthProvider>
           <ToastProvider>
-            <style>{`
-              * { box-sizing: border-box; }
-              body { margin: 0; background: #020617; }
-              [data-theme="light"] body { background: #f8fafc; }
-            `}</style>
+            <style>{`* { box-sizing: border-box; } body { margin: 0; background: #020617; }`}</style>
             <EmailVerificationPage token={verifyToken} />
           </ToastProvider>
         </AuthProvider>
@@ -2967,65 +3786,60 @@ export default function App() {
     );
   }
 
+  // ── Admin page ───────────────────────────────────────────
+  if (isAdminPath) {
+    return (
+      <ThemeProvider>
+        <ToastProvider>
+          <style>{`* { box-sizing: border-box; } body { margin: 0; background: #020617; }`}</style>
+          <AdminApp />
+        </ToastProvider>
+      </ThemeProvider>
+    );
+  }
+
+  // ── Main app ─────────────────────────────────────────────
   return (
     <ThemeProvider>
       <AuthProvider>
         <ToastProvider>
           <style>{`
-          * { box-sizing: border-box; }
-          body { margin: 0; background: #020617; transition: background 0.2s; }
-          @keyframes slide-up {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-          .animate-slide-up { animation: slide-up 0.3s ease-out; }
-          ::-webkit-scrollbar { width: 6px; height: 6px; }
-          ::-webkit-scrollbar-track { background: #0f172a; }
-          ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-          ::-webkit-scrollbar-thumb:hover { background: #475569; }
-
-          /* ─── LIGHT THEME ─── */
-          [data-theme="light"] body { background: #eef2f7 !important; }
-          [data-theme="light"] ::-webkit-scrollbar-track { background: #e2e8f0; }
-          [data-theme="light"] ::-webkit-scrollbar-thumb { background: #94a3b8; }
-
-          /* Backgrounds — slate-950/900 → white, slate-800 → light gray, slate-700 → border gray */
-          [data-theme="light"] .bg-slate-950 { background-color: #ffffff !important; }
-          [data-theme="light"] .bg-slate-900 { background-color: #ffffff !important; }
-          [data-theme="light"] .bg-slate-900\\/80 { background-color: rgba(255,255,255,0.95) !important; }  [data-theme="light"] .bg-slate-800 { background-color: #f1f5f9 !important; }
-          [data-theme="light"] .bg-slate-700 { background-color: #e2e8f0 !important; }
-          [data-theme="light"] .bg-slate-700\/50 { background-color: rgba(226,232,240,0.6) !important; }
-
-          /* Borders */
-          [data-theme="light"] .border-slate-800 { border-color: #e2e8f0 !important; }
-          [data-theme="light"] .border-slate-700 { border-color: #e2e8f0 !important; }
-          [data-theme="light"] .border-slate-700\/50 { border-color: rgba(226,232,240,0.9) !important; }
-          [data-theme="light"] .border-slate-600 { border-color: #cbd5e1 !important; }
-
-          /* Text */
-          [data-theme="light"] .text-white { color: #1e293b !important; }
-          [data-theme="light"] .text-slate-300 { color: #334155 !important; }
-          [data-theme="light"] .text-slate-400 { color: #475569 !important; }
-          [data-theme="light"] .text-slate-500 { color: #94a3b8 !important; }
-
-          /* Hover states */
-          [data-theme="light"] .hover\\:bg-slate-800:hover { background-color: #f1f5f9 !important; }
-          [data-theme="light"] .hover\\:bg-slate-700:hover { background-color: #e2e8f0 !important; }
-          [data-theme="light"] .hover\\:text-white:hover { color: #0f172a !important; }
-
-          /* Inputs and textareas */
-          [data-theme="light"] input { color: #1e293b !important; }
-          [data-theme="light"] input::placeholder { color: #94a3b8 !important; }
-          [data-theme="light"] textarea { color: #1e293b !important; }
-          [data-theme="light"] .placeholder-slate-500::placeholder { color: #94a3b8 !important; }
-
-          /* Card depth — subtle shadow so white cards lift off the gray page */
-          [data-theme="light"] .border.rounded-xl,
-          [data-theme="light"] .border.rounded-2xl,
-          [data-theme="light"] .border.rounded-3xl {
-            box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04);
-          }
-        `}</style>
+            * { box-sizing: border-box; }
+            body { margin: 0; background: #020617; transition: background 0.2s; }
+            @keyframes slide-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+            .animate-slide-up { animation: slide-up 0.3s ease-out; }
+            ::-webkit-scrollbar { width: 6px; height: 6px; }
+            ::-webkit-scrollbar-track { background: #0f172a; }
+            ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+            ::-webkit-scrollbar-thumb:hover { background: #475569; }
+            [data-theme="light"] body { background: #eef2f7 !important; }
+            [data-theme="light"] ::-webkit-scrollbar-track { background: #e2e8f0; }
+            [data-theme="light"] ::-webkit-scrollbar-thumb { background: #94a3b8; }
+            [data-theme="light"] .bg-slate-950 { background-color: #ffffff !important; }
+            [data-theme="light"] .bg-slate-900 { background-color: #ffffff !important; }
+            [data-theme="light"] .bg-slate-900\\/80 { background-color: rgba(255,255,255,0.95) !important; }
+            [data-theme="light"] .bg-slate-800 { background-color: #f1f5f9 !important; }
+            [data-theme="light"] .bg-slate-700 { background-color: #e2e8f0 !important; }
+            [data-theme="light"] .bg-slate-700\/50 { background-color: rgba(226,232,240,0.6) !important; }
+            [data-theme="light"] .border-slate-800 { border-color: #e2e8f0 !important; }
+            [data-theme="light"] .border-slate-700 { border-color: #e2e8f0 !important; }
+            [data-theme="light"] .border-slate-700\/50 { border-color: rgba(226,232,240,0.9) !important; }
+            [data-theme="light"] .border-slate-600 { border-color: #cbd5e1 !important; }
+            [data-theme="light"] .text-white { color: #1e293b !important; }
+            [data-theme="light"] .text-slate-300 { color: #334155 !important; }
+            [data-theme="light"] .text-slate-400 { color: #475569 !important; }
+            [data-theme="light"] .text-slate-500 { color: #94a3b8 !important; }
+            [data-theme="light"] .hover\\:bg-slate-800:hover { background-color: #f1f5f9 !important; }
+            [data-theme="light"] .hover\\:bg-slate-700:hover { background-color: #e2e8f0 !important; }
+            [data-theme="light"] .hover\\:text-white:hover { color: #0f172a !important; }
+            [data-theme="light"] input { color: #1e293b !important; }
+            [data-theme="light"] input::placeholder { color: #94a3b8 !important; }
+            [data-theme="light"] textarea { color: #1e293b !important; }
+            [data-theme="light"] .placeholder-slate-500::placeholder { color: #94a3b8 !important; }
+            [data-theme="light"] .border.rounded-xl,
+            [data-theme="light"] .border.rounded-2xl,
+            [data-theme="light"] .border.rounded-3xl { box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04); }
+          `}</style>
           <AppContent />
         </ToastProvider>
       </AuthProvider>
